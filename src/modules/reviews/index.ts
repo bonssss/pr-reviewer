@@ -1,2 +1,4 @@
-// Review automation and publishing module: inline comments, summaries, duplicate prevention (Phase 5)
-export {};
+export * from './review-publisher.service.js';
+export * from './review.service.js';
+export * from './review.controller.js';
+export * from './review.routes.js';

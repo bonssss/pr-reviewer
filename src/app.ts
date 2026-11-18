@@ -7,6 +7,7 @@ import { logger } from './config/logger.js';
 import { prisma } from './db/prisma.js';
 import { authRouter } from './modules/auth/index.js';
 import { repositoryRouter } from './modules/repositories/index.js';
+import { reviewRouter } from './modules/reviews/index.js';
 import { webhookRouter, RequestWithRawBody } from './webhooks/index.js';
 
 export function createApp(): Express {
@@ -75,6 +76,7 @@ export function createApp(): Express {
   // API Routers
   app.use('/api/auth', authRouter);
   app.use('/api/repositories', repositoryRouter);
+  app.use('/api/reviews', reviewRouter);
   app.use('/api/webhooks', webhookRouter);
   app.use('/webhooks', webhookRouter); // Alias for GitHub Webhook URL flexibility
 

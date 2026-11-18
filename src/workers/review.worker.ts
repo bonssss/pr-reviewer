@@ -4,6 +4,7 @@ import { logger } from '../config/logger.js';
 import { GitHubService } from '../modules/github/github.service.js';
 import { DiffParser, ParsedDiffSummary } from '../utils/diff.parser.js';
 import { AIService } from '../modules/ai/ai.service.js';
+import { ReviewPublisherService } from '../modules/reviews/review-publisher.service.js';
 
 export interface ReviewJob {
   reviewSessionId: string;
@@ -114,6 +115,13 @@ export class ReviewWorker extends EventEmitter {
         },
         'Background AI review completed successfully'
       );
+
+      // 7. Publish review comments and summary directly to GitHub
+      try {
+        await ReviewPublisherService.publishReviewToGitHub(job.reviewSessionId);
+      } catch (pubErr) {
+        logger.warn({ pubErr, reviewSessionId: job.reviewSessionId }, 'Failed to publish review to GitHub');
+      }
 
       this.emit('job:completed', { job, reviewResult });
     } catch (error) {
