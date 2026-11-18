@@ -3,6 +3,7 @@ import { prisma } from '../db/prisma.js';
 import { logger } from '../config/logger.js';
 import { GitHubService } from '../modules/github/github.service.js';
 import { DiffParser, ParsedDiffSummary } from '../utils/diff.parser.js';
+import { AIService } from '../modules/ai/ai.service.js';
 
 export interface ReviewJob {
   reviewSessionId: string;
@@ -31,9 +32,6 @@ export class ReviewWorker extends EventEmitter {
     return ReviewWorker.instance;
   }
 
-  /**
-   * Enqueue a review job for asynchronous background processing
-   */
   public enqueue(job: ReviewJob): void {
     this.queue.push(job);
     logger.info(
@@ -43,9 +41,6 @@ export class ReviewWorker extends EventEmitter {
     this.emit('job:enqueued', job);
   }
 
-  /**
-   * Process jobs sequentially from the queue
-   */
   private async processNextJob(): Promise<void> {
     if (this.isProcessing || this.queue.length === 0) {
       return;
@@ -62,7 +57,7 @@ export class ReviewWorker extends EventEmitter {
     const startTime = Date.now();
 
     try {
-      logger.info({ job }, 'Starting background PR diff fetching and processing');
+      logger.info({ job }, 'Starting background PR diff fetching and AI analysis');
 
       // 1. Mark session as IN_PROGRESS
       await prisma.reviewSession.update({
@@ -87,43 +82,40 @@ export class ReviewWorker extends EventEmitter {
       // 4. Parse and filter diff
       const diffSummary: ParsedDiffSummary = DiffParser.parseGitHubFiles(files);
 
-      const executionTimeMs = Date.now() - startTime;
-
-      // 5. Update session with parsed diff preparation (ready for Phase 4 AI analysis)
-      await prisma.reviewSession.update({
-        where: { id: job.reviewSessionId },
-        data: {
-          executionTimeMs,
-          rawAiResponse: {
-            diffSummary: {
-              totalFiles: diffSummary.totalFiles,
-              reviewableFiles: diffSummary.reviewableFiles,
-              totalAdditions: diffSummary.totalAdditions,
-              totalDeletions: diffSummary.totalDeletions,
-              files: diffSummary.files.map((f) => ({
-                filePath: f.filePath,
-                status: f.status,
-                additions: f.additions,
-                deletions: f.deletions,
-                isIgnored: f.isIgnored,
-                ignoreReason: f.ignoreReason,
-              })),
-            },
-          },
+      // 5. Look up PR metadata and custom repository guidelines from database
+      const dbPr = await prisma.pullRequest.findFirst({
+        where: {
+          number: job.pullNumber,
+          repository: { fullName: job.repoFullName },
         },
+        include: {
+          repository: true,
+        },
+      });
+
+      // 6. Execute AI code review
+      const reviewResult = await AIService.reviewPullRequest({
+        reviewSessionId: job.reviewSessionId,
+        prTitle: dbPr?.title || `PR #${job.pullNumber}`,
+        prNumber: job.pullNumber,
+        author: dbPr?.author || 'Unknown',
+        baseBranch: dbPr?.baseBranch || 'main',
+        headBranch: dbPr?.headBranch || 'patch',
+        diffSummary,
+        customPrompt: dbPr?.repository.customPrompt,
       });
 
       logger.info(
         {
           reviewSessionId: job.reviewSessionId,
-          totalFiles: diffSummary.totalFiles,
-          reviewableFiles: diffSummary.reviewableFiles,
-          durationMs: executionTimeMs,
+          totalIssues: reviewResult.totalIssues,
+          recommendation: reviewResult.recommendation,
+          durationMs: Date.now() - startTime,
         },
-        'Finished fetching and structuring PR diff'
+        'Background AI review completed successfully'
       );
 
-      this.emit('job:completed', { job, diffSummary });
+      this.emit('job:completed', { job, reviewResult });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown background review error';
       logger.error({ error, job }, 'PR review processing failed');
@@ -140,7 +132,6 @@ export class ReviewWorker extends EventEmitter {
       this.emit('job:failed', { job, error });
     } finally {
       this.isProcessing = false;
-      // Continue next job in queue if any
       if (this.queue.length > 0) {
         setImmediate(() => {
           void this.processNextJob();
@@ -149,9 +140,6 @@ export class ReviewWorker extends EventEmitter {
     }
   }
 
-  /**
-   * Helper method for inspection in tests or health checks
-   */
   public getQueueLength(): number {
     return this.queue.length;
   }

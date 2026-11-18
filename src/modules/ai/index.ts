@@ -1,2 +1,3 @@
-// AI code review engine module: OpenAI integration, system prompts, structured output (Phase 4)
-export {};
+export * from './ai.types.js';
+export * from './ai.prompt.js';
+export * from './ai.service.js';
