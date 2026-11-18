@@ -55,6 +55,8 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres_password@localhost:5432/pr_reviewer_test?schema=public
           NODE_ENV: test
           LOG_LEVEL: fatal
+          GITHUB_WEBHOOK_SECRET: development_webhook_secret_key
+          JWT_SECRET: test_jwt_secret_key_1234567890
         run: npm run test --workspace=backend
 
       - name: Build Backend
