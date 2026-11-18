@@ -22,6 +22,15 @@ export interface PublishResult {
   reason?: string;
 }
 
+export interface PublishOptions {
+  /**
+   * Publish even when another session already published a review for the same
+   * commit. Off by default: GitHub has no API to edit a submitted review body,
+   * so republishing an unchanged commit only adds duplicate noise.
+   */
+  force?: boolean;
+}
+
 export class ReviewPublisherService {
   /**
    * Format overall PR summary in clean Markdown.
@@ -36,6 +45,7 @@ export class ReviewPublisherService {
     lowIssues: number;
     totalIssues: number;
     aiModel?: string | null;
+    commitSha?: string | null;
   }): string {
     const {
       summary,
@@ -47,6 +57,7 @@ export class ReviewPublisherService {
       lowIssues,
       totalIssues,
       aiModel,
+      commitSha,
     } = params;
 
     const recommendationBadge =
@@ -82,7 +93,7 @@ ${recommendationBadge}
 ${summary}
 
 ---
-*Reviewed by AI PR Reviewer (${aiModel || env.OPENAI_MODEL}). Developer can request re-review at any time.*`;
+*Reviewed by AI PR Reviewer (${aiModel || env.OPENAI_MODEL})${commitSha ? ` · commit \`${commitSha.slice(0, 7)}\`` : ''}. Developer can request re-review at any time.*`;
   }
 
   /**
@@ -125,7 +136,10 @@ ${comment.message}`;
    * Comments whose line is not part of the diff (or that already exist on the
    * PR) are skipped, which avoids GitHub's 422 "line must be part of the diff".
    */
-  public static async publishReviewToGitHub(reviewSessionId: string): Promise<PublishResult> {
+  public static async publishReviewToGitHub(
+    reviewSessionId: string,
+    options: PublishOptions = {}
+  ): Promise<PublishResult> {
     const session = await prisma.reviewSession.findUnique({
       where: { id: reviewSessionId },
       include: {
@@ -162,6 +176,52 @@ ${comment.message}`;
       };
     }
 
+    // GitHub cannot edit a submitted review body. A manual re-review of an
+    // unchanged commit therefore produces a byte-identical review, which is
+    // pure noise on the PR. Publish once per (PR, commit) unless forced.
+    // Simulated (offline) publications must not block a later live publish.
+    const simulated = Boolean(process.env.VITEST) || !GitHubService.isConfigured();
+
+    if (!options.force && session.commitSha) {
+      const previousPublication = await prisma.reviewSession.findFirst({
+        where: {
+          prId: session.prId,
+          commitSha: session.commitSha,
+          id: { not: session.id },
+          publishedAt: { not: null },
+          ...(simulated
+            ? { githubReviewId: null }
+            : { githubReviewId: { not: null } }),
+        },
+        orderBy: { publishedAt: 'desc' },
+        select: { id: true, githubReviewId: true, publishedAt: true },
+      });
+
+      if (previousPublication) {
+        logger.info(
+          {
+            reviewSessionId,
+            previousSessionId: previousPublication.id,
+            githubReviewId: previousPublication.githubReviewId?.toString(),
+            commitSha: session.commitSha,
+          },
+          'Skipping duplicate publish: this commit already has a published review'
+        );
+
+        return {
+          published: false,
+          publishedCommentsCount: 0,
+          githubReviewId: previousPublication.githubReviewId
+            ? Number(previousPublication.githubReviewId)
+            : undefined,
+          simulated: previousPublication.githubReviewId === null,
+          reason:
+            'A review for this commit was already published on GitHub; skipped duplicate. ' +
+            'Push new commits or call publish with force=true to publish again.',
+        };
+      }
+    }
+
     const pr = session.pullRequest;
     const repo = pr.repository;
     const installationId = repo.installation?.installationId;
@@ -193,9 +253,8 @@ ${comment.message}`;
       lowIssues: session.lowIssues,
       totalIssues: session.totalIssues,
       aiModel: session.aiModel,
+      commitSha: session.commitSha,
     });
-
-    const simulated = Boolean(process.env.VITEST) || !GitHubService.isConfigured();
 
     if (simulated) {
       const commentIds = session.comments.map((comment) => comment.id);

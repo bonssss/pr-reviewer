@@ -57,10 +57,17 @@ export class ReviewController {
   /** POST /api/reviews/session/:sessionId/publish */
   public static async publishReview(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const result = await ReviewService.publishReview(req.user!.userId, req.params.sessionId);
+      const force = req.body?.force === true || req.query.force === 'true';
+      const result = await ReviewService.publishReview(
+        req.user!.userId,
+        req.params.sessionId,
+        { force }
+      );
 
       res.status(200).json({
-        message: 'Review published to GitHub successfully',
+        message: result.published
+          ? 'Review published to GitHub successfully'
+          : 'Review was not published again to avoid duplicating an existing review for this commit',
         result,
       });
     } catch (error) {

@@ -82,16 +82,23 @@ export class AIService {
     let completionTokens = 0;
     let totalTokens = 0;
     const model = env.OPENAI_MODEL;
+    // Distinguish a real model run from the deterministic offline fallback so
+    // published summaries never claim a model reviewed code it never saw.
+    let usedHeuristic = false;
 
     const client = this.getOpenAIClient();
 
     if (!client) {
       // Mock / Offline Heuristic Review Generator (for dev and tests without live OpenAI billings)
-      logger.warn('OpenAI API key not configured or set to mock. Using automated heuristic engine.');
+      logger.warn(
+        'OpenAI API key not configured or set to mock. Using the offline heuristic engine; ' +
+          'set OPENAI_API_KEY to enable real AI review.'
+      );
       rawOutput = this.generateHeuristicReview(diffSummary, prTitle);
       promptTokens = 250;
       completionTokens = 150;
       totalTokens = 400;
+      usedHeuristic = true;
     } else {
       try {
         // Reasoning models reject `max_tokens`; older chat models reject
@@ -176,7 +183,7 @@ export class AIService {
           highIssues,
           mediumIssues,
           lowIssues,
-          aiModel: model,
+          aiModel: usedHeuristic ? 'heuristic-engine' : model,
           promptTokens,
           completionTokens,
           totalTokens,
@@ -232,7 +239,7 @@ export class AIService {
       highIssues,
       mediumIssues,
       lowIssues,
-      aiModel: model,
+      aiModel: usedHeuristic ? 'heuristic-engine' : model,
       promptTokens,
       completionTokens,
       totalTokens,
@@ -329,7 +336,11 @@ export class AIService {
         : 'APPROVE';
 
     return {
-      summary: `Analyzed ${diffSummary.reviewableFiles} reviewable files for PR "${prTitle}". Identified ${issues.length} potential issues.`,
+      summary:
+        `Analyzed ${diffSummary.reviewableFiles} reviewable files for PR "${prTitle}" ` +
+        'with the offline heuristic engine (no OPENAI_API_KEY configured). ' +
+        `Identified ${issues.length} potential issues. ` +
+        'Only hardcoded credentials, eval(), and console.log are checked; configure OpenAI for a full review.',
       riskScore,
       recommendation,
       issues,

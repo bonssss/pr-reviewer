@@ -33,7 +33,9 @@ small static dashboard.
   provider. Patches that still look like they contain credentials are dropped.
 - **Safe publishing** — markdown is escaped, suggestion blocks cannot break out
   of their code fences, inline comments are validated against the diff, and
-  422 failures fall back to a single issue comment. Publishing is idempotent.
+  422 failures fall back to a single issue comment. Publishing is idempotent
+  and limited to one review per `(pull request, commit SHA)`, so re-reviewing
+  an unchanged commit does not spam the PR with identical reviews.
 - **Tenant isolation** — a user can only see repositories they own or that
   belong to an installation they connected. Other tenants' resources return
   `404`, never `403`.
@@ -116,6 +118,13 @@ production the process refuses to start unless:
   local single-host deployments).
 
 See `backend/.env.example` for every option.
+
+If `OPENAI_API_KEY` is missing, empty, or set to `mock_openai_api_key`, the
+backend does **not** call a model. It falls back to a deterministic offline
+heuristic engine that only flags hardcoded credentials, `eval()`, and
+`console.log`. Those reviews are labelled `heuristic-engine` and say so in the
+summary, so they are never mistaken for a full AI review. Set a real key to
+enable AI analysis.
 
 ### GitHub App setup
 

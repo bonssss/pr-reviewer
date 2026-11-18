@@ -808,6 +808,65 @@ describe('Security & Hardening', () => {
         await prisma.reviewSession.deleteMany({ where: { id: session.id } });
       }
     });
+
+    it('publishes at most once per PR commit, even across re-review sessions', async () => {
+      const commitSha = 'security-publish-commit-dedupe';
+      const first = await prisma.reviewSession.create({
+        data: {
+          prId: prAId,
+          commitSha,
+          status: 'COMPLETED',
+          summary: 'first run',
+          riskScore: 15,
+          recommendation: 'APPROVE',
+        },
+      });
+      const second = await prisma.reviewSession.create({
+        data: {
+          prId: prAId,
+          commitSha,
+          status: 'COMPLETED',
+          summary: 'second run, identical commit',
+          riskScore: 15,
+          recommendation: 'APPROVE',
+        },
+      });
+
+      try {
+        const firstResult = await ReviewPublisherService.publishReviewToGitHub(first.id);
+        expect(firstResult.published).toBe(true);
+
+        const duplicateResult = await ReviewPublisherService.publishReviewToGitHub(second.id);
+        expect(duplicateResult.published).toBe(false);
+        expect(duplicateResult.reason).toContain('already published on GitHub');
+
+        // Explicit force still allows an intentional republish.
+        const forcedResult = await ReviewPublisherService.publishReviewToGitHub(second.id, {
+          force: true,
+        });
+        expect(forcedResult.published).toBe(true);
+      } finally {
+        await prisma.reviewSession.deleteMany({ where: { id: { in: [first.id, second.id] } } });
+      }
+    });
+
+    it('stamps the reviewed commit into the summary footer', () => {
+      const markdown = ReviewPublisherService.formatReviewSummaryMarkdown({
+        summary: 'Looks good.',
+        riskScore: 5,
+        recommendation: 'APPROVE',
+        criticalIssues: 0,
+        highIssues: 0,
+        mediumIssues: 0,
+        lowIssues: 0,
+        totalIssues: 0,
+        aiModel: 'heuristic-engine',
+        commitSha: '4798147abcdef0123456789',
+      });
+
+      expect(markdown).toContain('heuristic-engine');
+      expect(markdown).toContain('commit `4798147`');
+    });
   });
 
   // -------------------------------------------------------------------------
