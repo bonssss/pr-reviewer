@@ -808,6 +808,85 @@ describe('Security & Hardening', () => {
         await prisma.reviewSession.deleteMany({ where: { id: session.id } });
       }
     });
+
+    it('publishes at most once per PR commit and engine, even across re-review sessions', async () => {
+      const commitSha = 'security-publish-commit-dedupe';
+      const first = await prisma.reviewSession.create({
+        data: {
+          prId: prAId,
+          commitSha,
+          status: 'COMPLETED',
+          summary: 'first run',
+          riskScore: 15,
+          recommendation: 'APPROVE',
+          aiModel: 'heuristic-engine',
+        },
+      });
+      const second = await prisma.reviewSession.create({
+        data: {
+          prId: prAId,
+          commitSha,
+          status: 'COMPLETED',
+          summary: 'second run, identical commit',
+          riskScore: 15,
+          recommendation: 'APPROVE',
+          aiModel: 'heuristic-engine',
+        },
+      });
+      const upgraded = await prisma.reviewSession.create({
+        data: {
+          prId: prAId,
+          commitSha,
+          status: 'COMPLETED',
+          summary: 'real model run after switching providers',
+          riskScore: 15,
+          recommendation: 'APPROVE',
+          aiModel: 'gemini-2.5-flash',
+        },
+      });
+
+      try {
+        const firstResult = await ReviewPublisherService.publishReviewToGitHub(first.id);
+        expect(firstResult.published).toBe(true);
+
+        const duplicateResult = await ReviewPublisherService.publishReviewToGitHub(second.id);
+        expect(duplicateResult.published).toBe(false);
+        expect(duplicateResult.reason).toContain('already published on GitHub');
+
+        // Explicit force still allows an intentional republish.
+        const forcedResult = await ReviewPublisherService.publishReviewToGitHub(second.id, {
+          force: true,
+        });
+        expect(forcedResult.published).toBe(true);
+
+        // Switching from the heuristic to a real model is a meaningful change,
+        // so the same commit may be published once by the new engine.
+        const upgradedResult = await ReviewPublisherService.publishReviewToGitHub(upgraded.id);
+        expect(upgradedResult.published).toBe(true);
+      } finally {
+        await prisma.reviewSession.deleteMany({
+          where: { id: { in: [first.id, second.id, upgraded.id] } },
+        });
+      }
+    });
+
+    it('stamps the reviewed commit into the summary footer', () => {
+      const markdown = ReviewPublisherService.formatReviewSummaryMarkdown({
+        summary: 'Looks good.',
+        riskScore: 5,
+        recommendation: 'APPROVE',
+        criticalIssues: 0,
+        highIssues: 0,
+        mediumIssues: 0,
+        lowIssues: 0,
+        totalIssues: 0,
+        aiModel: 'heuristic-engine',
+        commitSha: '4798147abcdef0123456789',
+      });
+
+      expect(markdown).toContain('heuristic-engine');
+      expect(markdown).toContain('commit `4798147`');
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -861,6 +940,29 @@ describe('Security & Hardening', () => {
 
       const parsed = parseEnv({ ...productionEnv, FRONTEND_URL: 'http://localhost' });
       expect(parsed.FRONTEND_URL).toBe('http://localhost');
+
+      vi.restoreAllMocks();
+    });
+
+    it('accepts an OpenAI-compatible base URL and ignores an empty one', () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const gemini = parseEnv({
+        ...productionEnv,
+        OPENAI_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+        OPENAI_MODEL: 'gemini-2.5-flash',
+      });
+      expect(gemini.OPENAI_BASE_URL).toBe(
+        'https://generativelanguage.googleapis.com/v1beta/openai/'
+      );
+      expect(gemini.OPENAI_MODEL).toBe('gemini-2.5-flash');
+
+      const defaulted = parseEnv({ ...productionEnv, OPENAI_BASE_URL: '' });
+      expect(defaulted.OPENAI_BASE_URL).toBeUndefined();
+
+      expect(() =>
+        parseEnv({ ...productionEnv, OPENAI_BASE_URL: 'not-a-url' })
+      ).toThrow();
 
       vi.restoreAllMocks();
     });

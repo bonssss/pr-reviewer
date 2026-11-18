@@ -129,7 +129,11 @@ export class ReviewService {
   }
 
   /** Manually publish a completed review to GitHub. */
-  public static async publishReview(userId: string, sessionId: string) {
+  public static async publishReview(
+    userId: string,
+    sessionId: string,
+    options: { force?: boolean } = {}
+  ) {
     const session = await prisma.reviewSession.findFirst({
       where: { AND: [{ id: sessionId }, await buildReviewSessionAccessWhere(userId)] },
       select: { id: true, status: true },
@@ -143,6 +147,6 @@ export class ReviewService {
       throw conflict('Only completed reviews can be published to GitHub');
     }
 
-    return ReviewPublisherService.publishReviewToGitHub(sessionId);
+    return ReviewPublisherService.publishReviewToGitHub(sessionId, { force: options.force });
   }
 }
