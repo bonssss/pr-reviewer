@@ -187,6 +187,9 @@ ${comment.message}`;
         where: {
           prId: session.prId,
           commitSha: session.commitSha,
+          // A different engine may genuinely produce a different review, so
+          // only dedupe when the same model already reviewed this commit.
+          aiModel: session.aiModel,
           id: { not: session.id },
           publishedAt: { not: null },
           ...(simulated

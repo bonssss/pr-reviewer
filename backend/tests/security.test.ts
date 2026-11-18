@@ -809,7 +809,7 @@ describe('Security & Hardening', () => {
       }
     });
 
-    it('publishes at most once per PR commit, even across re-review sessions', async () => {
+    it('publishes at most once per PR commit and engine, even across re-review sessions', async () => {
       const commitSha = 'security-publish-commit-dedupe';
       const first = await prisma.reviewSession.create({
         data: {
@@ -819,6 +819,7 @@ describe('Security & Hardening', () => {
           summary: 'first run',
           riskScore: 15,
           recommendation: 'APPROVE',
+          aiModel: 'heuristic-engine',
         },
       });
       const second = await prisma.reviewSession.create({
@@ -829,6 +830,18 @@ describe('Security & Hardening', () => {
           summary: 'second run, identical commit',
           riskScore: 15,
           recommendation: 'APPROVE',
+          aiModel: 'heuristic-engine',
+        },
+      });
+      const upgraded = await prisma.reviewSession.create({
+        data: {
+          prId: prAId,
+          commitSha,
+          status: 'COMPLETED',
+          summary: 'real model run after switching providers',
+          riskScore: 15,
+          recommendation: 'APPROVE',
+          aiModel: 'gemini-2.5-flash',
         },
       });
 
@@ -845,8 +858,15 @@ describe('Security & Hardening', () => {
           force: true,
         });
         expect(forcedResult.published).toBe(true);
+
+        // Switching from the heuristic to a real model is a meaningful change,
+        // so the same commit may be published once by the new engine.
+        const upgradedResult = await ReviewPublisherService.publishReviewToGitHub(upgraded.id);
+        expect(upgradedResult.published).toBe(true);
       } finally {
-        await prisma.reviewSession.deleteMany({ where: { id: { in: [first.id, second.id] } } });
+        await prisma.reviewSession.deleteMany({
+          where: { id: { in: [first.id, second.id, upgraded.id] } },
+        });
       }
     });
 

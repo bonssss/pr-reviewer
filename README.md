@@ -34,8 +34,9 @@ small static dashboard.
 - **Safe publishing** — markdown is escaped, suggestion blocks cannot break out
   of their code fences, inline comments are validated against the diff, and
   422 failures fall back to a single issue comment. Publishing is idempotent
-  and limited to one review per `(pull request, commit SHA)`, so re-reviewing
-  an unchanged commit does not spam the PR with identical reviews.
+  and limited to one review per `(pull request, commit SHA, model)`, so
+  re-reviewing an unchanged commit does not spam the PR with identical
+  reviews (switching providers still publishes one review from the new model).
 - **Tenant isolation** — a user can only see repositories they own or that
   belong to an installation they connected. Other tenants' resources return
   `404`, never `403`.
