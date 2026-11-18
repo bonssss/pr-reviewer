@@ -2,87 +2,62 @@ import { Response } from 'express';
 import { ReviewService } from './review.service.js';
 import { AuthenticatedRequest } from '../auth/auth.types.js';
 import { logger } from '../../config/logger.js';
+import { parsePagination } from '../../utils/errors.js';
 
 export class ReviewController {
-  /**
-   * GET /api/reviews/session/:sessionId
-   * View complete review report and inline comments
-   */
-  public static async getSession(
-    req: AuthenticatedRequest,
-    res: Response
-  ): Promise<void> {
+  /** GET /api/reviews/session/:sessionId */
+  public static async getSession(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { sessionId } = req.params;
-      const session = await ReviewService.getReviewSessionById(sessionId);
+      const session = await ReviewService.getReviewSessionById(req.user!.userId, req.params.sessionId);
 
       if (!session) {
-        res.status(404).json({ error: 'Review session not found' });
+        res.status(404).json({ error: 'Review session not found', code: 'NOT_FOUND' });
         return;
       }
 
       res.status(200).json({ session });
     } catch (error) {
       logger.error({ error }, 'Failed to fetch review session');
-      res.status(500).json({ error: 'Internal Server Error' });
+      throw error;
     }
   }
 
-  /**
-   * GET /api/reviews/pr/:prId/history
-   * View historical review timeline for a PR
-   */
-  public static async getHistory(
-    req: AuthenticatedRequest,
-    res: Response
-  ): Promise<void> {
+  /** GET /api/reviews/pr/:prId/history */
+  public static async getHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { prId } = req.params;
-      const history = await ReviewService.getPrReviewHistory(prId);
+      const pagination = parsePagination(req.query, { limit: 50, maxLimit: 200 });
+      const history = await ReviewService.getPrReviewHistory(
+        req.user!.userId,
+        req.params.prId,
+        pagination
+      );
 
-      res.status(200).json({ history });
+      res.status(200).json({ history, limit: pagination.limit, offset: pagination.offset });
     } catch (error) {
       logger.error({ error }, 'Failed to fetch PR review history');
-      res.status(500).json({ error: 'Internal Server Error' });
+      throw error;
     }
   }
 
-  /**
-   * POST /api/reviews/pr/:prId/rerun
-   * Trigger a manual re-review
-   */
-  public static async rerunReview(
-    req: AuthenticatedRequest,
-    res: Response
-  ): Promise<void> {
+  /** POST /api/reviews/pr/:prId/rerun */
+  public static async rerunReview(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { prId } = req.params;
-      const session = await ReviewService.requestReReview(prId);
+      const session = await ReviewService.requestReReview(req.user!.userId, req.params.prId);
 
       res.status(202).json({
         message: 'Re-review requested and enqueued successfully',
         reviewSession: session,
       });
     } catch (error) {
-      logger.error({ error }, 'Failed to request re-review');
-      res.status(500).json({
-        error: 'Failed to request re-review',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      });
+      logger.warn({ error }, 'Failed to request re-review');
+      throw error;
     }
   }
 
-  /**
-   * POST /api/reviews/session/:sessionId/publish
-   * Manually trigger publishing review comments to GitHub
-   */
-  public static async publishReview(
-    req: AuthenticatedRequest,
-    res: Response
-  ): Promise<void> {
+  /** POST /api/reviews/session/:sessionId/publish */
+  public static async publishReview(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { sessionId } = req.params;
-      const result = await ReviewService.publishReview(sessionId);
+      const result = await ReviewService.publishReview(req.user!.userId, req.params.sessionId);
 
       res.status(200).json({
         message: 'Review published to GitHub successfully',
@@ -90,10 +65,7 @@ export class ReviewController {
       });
     } catch (error) {
       logger.error({ error }, 'Failed to publish review');
-      res.status(500).json({
-        error: 'Failed to publish review to GitHub',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      });
+      throw error;
     }
   }
 }

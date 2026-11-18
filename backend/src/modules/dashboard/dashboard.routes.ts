@@ -1,8 +1,17 @@
 import { Router } from 'express';
 import { DashboardController } from './dashboard.controller.js';
-import { optionalAuthenticateToken } from '../auth/auth.middleware.js';
+import { authenticateToken } from '../auth/auth.middleware.js';
+import { asyncHandler } from '../../utils/errors.js';
 
 export const dashboardRouter = Router();
 
-dashboardRouter.get('/stats', optionalAuthenticateToken, DashboardController.getStats);
-dashboardRouter.get('/prs', optionalAuthenticateToken, DashboardController.getPullRequests);
+dashboardRouter.use(authenticateToken);
+
+dashboardRouter.get(
+  '/stats',
+  asyncHandler(async (req, res) => DashboardController.getStats(req, res))
+);
+dashboardRouter.get(
+  '/prs',
+  asyncHandler(async (req, res) => DashboardController.getPullRequests(req, res))
+);

@@ -21,6 +21,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "db:generate": "npm run db:generate --workspace=backend",
     "db:migrate": "npm run db:migrate --workspace=backend",
+    "db:deploy": "npm run db:deploy --workspace=backend",
     "db:push": "npm run db:push --workspace=backend",
     "db:studio": "npm run db:studio --workspace=backend",
     "webhook:proxy": "npm run webhook:proxy --workspace=backend",

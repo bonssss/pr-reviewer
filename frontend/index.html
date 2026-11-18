@@ -4,31 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Pull Request Reviewer - Dashboard</title>
-  <!-- Tailwind CSS CDN for instant styling -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#f0fdf4',
-              500: '#22c55e',
-              600: '#16a34a',
-              700: '#15803d',
-            },
-            dark: {
-              900: '#0d1117',
-              800: '#161b22',
-              700: '#21262d',
-              600: '#30363d',
-            }
-          }
-        }
-      }
-    }
-  </script>
+  <link rel="stylesheet" href="./tailwind.css">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body class="bg-[#090d13] text-gray-200 min-h-screen flex flex-col font-sans antialiased">
@@ -47,20 +23,20 @@
 
       <!-- Navigation Tabs -->
       <nav class="hidden md:flex space-x-1" id="nav-tabs">
-        <button onclick="switchTab('overview')" id="tab-btn-overview" class="tab-btn active px-4 py-2 rounded-md text-sm font-medium transition-colors">
+        <button data-action="switch-tab" data-tab="overview" id="tab-btn-overview" class="tab-btn active px-4 py-2 rounded-md text-sm font-medium transition-colors">
           Overview
         </button>
-        <button onclick="switchTab('repositories')" id="tab-btn-repositories" class="tab-btn px-4 py-2 rounded-md text-sm font-medium transition-colors">
+        <button data-action="switch-tab" data-tab="repositories" id="tab-btn-repositories" class="tab-btn px-4 py-2 rounded-md text-sm font-medium transition-colors">
           Repositories
         </button>
-        <button onclick="switchTab('pull-requests')" id="tab-btn-pull-requests" class="tab-btn px-4 py-2 rounded-md text-sm font-medium transition-colors">
+        <button data-action="switch-tab" data-tab="pull-requests" id="tab-btn-pull-requests" class="tab-btn px-4 py-2 rounded-md text-sm font-medium transition-colors">
           Pull Requests
         </button>
       </nav>
 
       <!-- User Authentication & Action Menu -->
       <div class="flex items-center space-x-3" id="auth-container">
-        <button onclick="loginWithGitHub()" id="btn-login" class="flex items-center space-x-2 bg-dark-700 hover:bg-dark-600 text-white text-xs font-medium px-3.5 py-2 rounded-lg border border-dark-600 transition shadow-sm">
+        <button data-action="login" id="btn-login" class="flex items-center space-x-2 bg-dark-700 hover:bg-dark-600 text-white text-xs font-medium px-3.5 py-2 rounded-lg border border-dark-600 transition shadow-sm">
           <svg class="h-4 w-4 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           <span>Connect GitHub</span>
         </button>
@@ -74,6 +50,19 @@
 
   <!-- Main Content Container -->
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">
+    <!-- Authentication gate: the API requires a session for all data. -->
+    <section id="auth-gate" class="hidden rounded-xl border border-dark-600 bg-dark-800 p-10 text-center space-y-4">
+      <h2 class="text-xl font-bold text-white">Sign in to view your dashboard</h2>
+      <p class="text-sm text-gray-400 max-w-xl mx-auto">
+        Connect your GitHub account to see connected repositories, pull requests, and AI review reports.
+        Your session is required to keep every tenant's data private.
+      </p>
+      <p id="auth-error" class="hidden text-xs text-rose-400 max-w-xl mx-auto"></p>
+      <button data-action="login" class="inline-flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+        <span>Connect GitHub</span>
+      </button>
+    </section>
+
     <!-- TAB 1: OVERVIEW -->
     <section id="view-overview" class="tab-view space-y-8">
       <!-- KPI Top Row -->
@@ -106,7 +95,7 @@
           <span class="text-xs font-semibold uppercase tracking-wider text-gray-400">Connected Repos</span>
           <div class="mt-2 flex items-baseline justify-between">
             <span id="stat-total-repos" class="text-3xl font-extrabold text-white">0</span>
-            <button onclick="switchTab('repositories')" class="text-xs font-medium text-indigo-400 hover:underline">Manage &rarr;</button>
+            <button data-action="switch-tab" data-tab="repositories" class="text-xs font-medium text-indigo-400 hover:underline">Manage &rarr;</button>
           </div>
         </div>
       </div>
@@ -166,7 +155,7 @@
         <div class="lg:col-span-2 p-6 rounded-xl bg-dark-800 border border-dark-600">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-base font-semibold text-white">Recent Pull Request Reviews</h3>
-            <button onclick="loadDashboardData()" class="text-xs text-gray-400 hover:text-white flex items-center space-x-1">
+            <button data-action="refresh-dashboard" class="text-xs text-gray-400 hover:text-white flex items-center space-x-1">
               <span>↻ Refresh</span>
             </button>
           </div>
@@ -200,7 +189,7 @@
           <p class="text-xs text-gray-400 mt-1">Configure automated review rules and custom AI instructions per repository.</p>
         </div>
         <div class="flex items-center space-x-2">
-          <a href="https://github.com/apps" target="_blank" class="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition shadow-sm">
+          <a href="https://github.com/apps" target="_blank" rel="noopener noreferrer" class="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition shadow-sm">
             + Install GitHub App
           </a>
         </div>
@@ -218,7 +207,7 @@
           <h2 class="text-xl font-bold text-white">Pull Requests Explorer</h2>
           <p class="text-xs text-gray-400 mt-1">Review sessions, AI reports, and historical findings.</p>
         </div>
-        <input type="text" id="pr-search-input" oninput="filterPullRequests()" placeholder="Search pull requests or author..." class="bg-dark-700 border border-dark-600 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-500 w-64">
+        <input type="text" id="pr-search-input" placeholder="Search pull requests or author..." class="bg-dark-700 border border-dark-600 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-500 w-64">
       </div>
 
       <div class="overflow-x-auto rounded-xl border border-dark-600 bg-dark-800">
@@ -255,10 +244,10 @@
           <p id="modal-repo-name" class="text-xs text-gray-400 mt-0.5">owner/repository</p>
         </div>
         <div class="flex items-center space-x-3">
-          <button id="modal-btn-rerun" onclick="triggerReReview()" class="px-3 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-xs font-medium text-white border border-dark-600 transition flex items-center space-x-1">
+          <button id="modal-btn-rerun" data-action="rerun-review" class="px-3 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-xs font-medium text-white border border-dark-600 transition flex items-center space-x-1">
             <span>⚡ Request Re-Review</span>
           </button>
-          <button onclick="closeReviewModal()" class="text-gray-400 hover:text-white text-xl p-1">&times;</button>
+          <button data-action="close-review" class="text-gray-400 hover:text-white text-xl p-1">&times;</button>
         </div>
       </div>
 
@@ -281,11 +270,11 @@
           <div class="flex items-center justify-between border-b border-dark-700 pb-2 mb-3">
             <h4 class="font-bold text-sm text-white">Identified Issues (<span id="modal-issues-count">0</span>)</h4>
             <div class="flex space-x-1" id="severity-filter-btns">
-              <button onclick="filterIssues('ALL')" class="px-2.5 py-1 rounded bg-dark-700 text-white text-[11px] font-medium">All</button>
-              <button onclick="filterIssues('CRITICAL')" class="px-2.5 py-1 rounded hover:bg-dark-700 text-rose-400 text-[11px] font-medium">Critical</button>
-              <button onclick="filterIssues('HIGH')" class="px-2.5 py-1 rounded hover:bg-dark-700 text-amber-400 text-[11px] font-medium">High</button>
-              <button onclick="filterIssues('MEDIUM')" class="px-2.5 py-1 rounded hover:bg-dark-700 text-yellow-300 text-[11px] font-medium">Medium</button>
-              <button onclick="filterIssues('LOW')" class="px-2.5 py-1 rounded hover:bg-dark-700 text-blue-300 text-[11px] font-medium">Low</button>
+              <button data-action="filter-issues" data-severity="ALL" class="px-2.5 py-1 rounded bg-dark-700 text-white text-[11px] font-medium">All</button>
+              <button data-action="filter-issues" data-severity="CRITICAL" class="px-2.5 py-1 rounded hover:bg-dark-700 text-rose-400 text-[11px] font-medium">Critical</button>
+              <button data-action="filter-issues" data-severity="HIGH" class="px-2.5 py-1 rounded hover:bg-dark-700 text-amber-400 text-[11px] font-medium">High</button>
+              <button data-action="filter-issues" data-severity="MEDIUM" class="px-2.5 py-1 rounded hover:bg-dark-700 text-yellow-300 text-[11px] font-medium">Medium</button>
+              <button data-action="filter-issues" data-severity="LOW" class="px-2.5 py-1 rounded hover:bg-dark-700 text-blue-300 text-[11px] font-medium">Low</button>
             </div>
           </div>
 
@@ -302,7 +291,7 @@
     <div class="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4">
       <div class="flex items-center justify-between border-b border-dark-700 pb-3">
         <h3 class="text-base font-bold text-white">Repository Review Settings</h3>
-        <button onclick="closeRepoModal()" class="text-gray-400 hover:text-white">&times;</button>
+        <button data-action="close-repo" class="text-gray-400 hover:text-white">&times;</button>
       </div>
 
       <div class="space-y-3 text-xs">
@@ -321,8 +310,8 @@
       </div>
 
       <div class="flex justify-end space-x-2 pt-2 border-t border-dark-700">
-        <button onclick="closeRepoModal()" class="px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:text-white text-xs">Cancel</button>
-        <button onclick="saveRepoSettings()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold">Save Settings</button>
+        <button data-action="close-repo" class="px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:text-white text-xs">Cancel</button>
+        <button data-action="save-repo" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold">Save Settings</button>
       </div>
     </div>
   </div>

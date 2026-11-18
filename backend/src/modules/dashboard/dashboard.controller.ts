@@ -1,36 +1,43 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { DashboardService } from './dashboard.service.js';
+import { AuthenticatedRequest } from '../auth/auth.types.js';
 import { logger } from '../../config/logger.js';
+import { parsePagination } from '../../utils/errors.js';
 
 export class DashboardController {
-  /**
-   * GET /api/dashboard/stats
-   * Overview metrics for dashboard charts and KPI cards
-   */
-  public static async getStats(_req: Request, res: Response): Promise<void> {
+  /** GET /api/dashboard/stats */
+  public static async getStats(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const stats = await DashboardService.getOverviewStats();
+      const stats = await DashboardService.getOverviewStats(req.user!.userId);
       res.status(200).json({ stats });
     } catch (error) {
       logger.error({ error }, 'Failed to fetch dashboard overview stats');
-      res.status(500).json({ error: 'Internal Server Error' });
+      throw error;
     }
   }
 
-  /**
-   * GET /api/dashboard/prs
-   * List pull requests with their latest AI review status
-   */
-  public static async getPullRequests(req: Request, res: Response): Promise<void> {
+  /** GET /api/dashboard/prs */
+  public static async getPullRequests(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const repoId = req.query.repoId as string | undefined;
-      const search = req.query.search as string | undefined;
+      const repoId = typeof req.query.repoId === 'string' ? req.query.repoId : undefined;
+      const search =
+        typeof req.query.search === 'string' ? req.query.search.slice(0, 200) : undefined;
+      const pagination = parsePagination(req.query, { limit: 50, maxLimit: 200 });
 
-      const pullRequests = await DashboardService.listPullRequests({ repoId, search });
-      res.status(200).json({ pullRequests });
+      const pullRequests = await DashboardService.listPullRequests(
+        req.user!.userId,
+        { repoId, search },
+        pagination
+      );
+
+      res.status(200).json({
+        pullRequests,
+        limit: pagination.limit,
+        offset: pagination.offset,
+      });
     } catch (error) {
       logger.error({ error }, 'Failed to list pull requests for dashboard');
-      res.status(500).json({ error: 'Internal Server Error' });
+      throw error;
     }
   }
 }

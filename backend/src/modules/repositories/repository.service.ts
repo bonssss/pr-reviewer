@@ -1,54 +1,81 @@
+import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
 import { logger } from '../../config/logger.js';
 import { GitHubService } from '../github/github.service.js';
+import { buildRepositoryAccessWhere } from '../auth/access.js';
+import { notFound } from '../../utils/errors.js';
 
 export interface ListRepositoriesFilter {
   search?: string;
   autoReviewEnabled?: boolean;
 }
 
+const REPOSITORY_SUMMARY_SELECT = {
+  id: true,
+  githubRepoId: true,
+  name: true,
+  fullName: true,
+  owner: true,
+  isPrivate: true,
+  defaultBranch: true,
+  webhookActive: true,
+  autoReviewEnabled: true,
+  customPrompt: true,
+  createdAt: true,
+  updatedAt: true,
+  installation: {
+    select: {
+      id: true,
+      installationId: true,
+      accountName: true,
+      accountType: true,
+      isSuspended: true,
+    },
+  },
+  _count: { select: { pullRequests: true } },
+} as const;
+
 export class RepositoryService {
-  /**
-   * List repositories with review counts and installation info
-   */
+  /** List repositories the caller is allowed to see, with review metrics. */
   public static async listRepositories(
-    _userId?: string,
-    filters?: ListRepositoriesFilter
+    userId: string,
+    filters?: ListRepositoriesFilter,
+    pagination: { limit: number; offset: number } = { limit: 50, offset: 0 }
   ) {
-    const where: Record<string, unknown> = {};
+    const access = await buildRepositoryAccessWhere(userId);
 
-    if (filters?.autoReviewEnabled !== undefined) {
-      where.autoReviewEnabled = filters.autoReviewEnabled;
-    }
+    const searchFilter = filters?.search
+      ? {
+          OR: [
+            { name: { contains: filters.search, mode: 'insensitive' as const } },
+            { fullName: { contains: filters.search, mode: 'insensitive' as const } },
+            { owner: { contains: filters.search, mode: 'insensitive' as const } },
+          ],
+        }
+      : {};
 
-    if (filters?.search) {
-      where.OR = [
-        { name: { contains: filters.search, mode: 'insensitive' } },
-        { fullName: { contains: filters.search, mode: 'insensitive' } },
-        { owner: { contains: filters.search, mode: 'insensitive' } },
-      ];
-    }
-
-    const repositories = await prisma.repository.findMany({
-      where,
-      include: {
-        installation: {
-          select: {
-            id: true,
-            installationId: true,
-            accountName: true,
-            accountType: true,
-          },
-        },
-        _count: {
-          select: {
-            pullRequests: true,
-          },
-        },
+    return prisma.repository.findMany({
+      where: {
+        AND: [
+          access,
+          searchFilter,
+          ...(filters?.autoReviewEnabled !== undefined
+            ? [{ autoReviewEnabled: filters.autoReviewEnabled }]
+            : []),
+        ],
+      },
+      select: {
+        ...REPOSITORY_SUMMARY_SELECT,
         pullRequests: {
           take: 3,
           orderBy: { updatedAt: 'desc' },
-          include: {
+          select: {
+            id: true,
+            number: true,
+            title: true,
+            state: true,
+            author: true,
+            updatedAt: true,
             reviewSessions: {
               take: 1,
               orderBy: { createdAt: 'desc' },
@@ -64,24 +91,24 @@ export class RepositoryService {
         },
       },
       orderBy: { updatedAt: 'desc' },
+      take: pagination.limit,
+      skip: pagination.offset,
     });
-
-    return repositories;
   }
 
-  /**
-   * Retrieve single repository by ID with full PR history
-   */
-  public static async getRepositoryById(id: string) {
-    const repository = await prisma.repository.findUnique({
-      where: { id },
+  /** Single repository (tenant already verified by middleware). */
+  public static async getRepositoryById(userId: string, id: string) {
+    const repository = await prisma.repository.findFirst({
+      where: { AND: [{ id }, await buildRepositoryAccessWhere(userId)] },
       include: {
         installation: true,
         pullRequests: {
           orderBy: { number: 'desc' },
+          take: 100,
           include: {
             reviewSessions: {
               orderBy: { createdAt: 'desc' },
+              take: 10,
               select: {
                 id: true,
                 status: true,
@@ -99,19 +126,31 @@ export class RepositoryService {
       },
     });
 
+    if (!repository) {
+      throw notFound('Repository not found');
+    }
+
     return repository;
   }
 
-  /**
-   * Update repository settings (toggle auto-review, custom review guidelines)
-   */
+  /** Update repository settings after the caller's access has been verified. */
   public static async updateRepository(
+    userId: string,
     id: string,
     data: {
       autoReviewEnabled?: boolean;
       customPrompt?: string | null;
     }
   ) {
+    const repository = await prisma.repository.findFirst({
+      where: { AND: [{ id }, await buildRepositoryAccessWhere(userId)] },
+      select: { id: true },
+    });
+
+    if (!repository) {
+      throw notFound('Repository not found');
+    }
+
     const updated = await prisma.repository.update({
       where: { id },
       data: {
@@ -125,9 +164,12 @@ export class RepositoryService {
   }
 
   /**
-   * Trigger a manual sync of repositories from GitHub App Installation
+   * Manually sync repositories for an installation. The route middleware has
+   * already verified the caller is linked to this installation.
    */
   public static async syncRepositoriesFromInstallation(installationId: string | number | bigint) {
     return GitHubService.syncInstallationRepositories(BigInt(installationId));
   }
 }
+
+export const uuidSchema = z.string().uuid();

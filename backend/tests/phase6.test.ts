@@ -2,9 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { prisma, connectDatabase, disconnectDatabase } from '../src/db/prisma.js';
+import { AuthService } from '../src/modules/auth/auth.service.js';
 
 describe('Phase 6: Web Dashboard Integration Tests', () => {
   const app = createApp();
+  let testUserId: string;
+  let testUserToken: string;
   let testRepoId: string;
   let testPrId: string;
   let testSessionId: string;
@@ -12,10 +15,26 @@ describe('Phase 6: Web Dashboard Integration Tests', () => {
   beforeAll(async () => {
     await connectDatabase();
 
+    const user = await prisma.user.upsert({
+      where: { githubId: 'gh_user_phase6' },
+      update: {},
+      create: {
+        githubId: 'gh_user_phase6',
+        username: 'phase6dashboard',
+        email: 'dashboard@example.com',
+      },
+    });
+    testUserId = user.id;
+    testUserToken = AuthService.signToken({
+      userId: user.id,
+      githubId: user.githubId,
+      username: user.username,
+    });
+
     // Create seed repository, PR, and completed review session
     const repo = await prisma.repository.upsert({
       where: { githubRepoId: BigInt(771122) },
-      update: {},
+      update: { ownerUserId: user.id },
       create: {
         githubRepoId: BigInt(771122),
         name: 'dashboard-test-repo',
@@ -23,6 +42,7 @@ describe('Phase 6: Web Dashboard Integration Tests', () => {
         owner: 'bonssss',
         isPrivate: false,
         autoReviewEnabled: true,
+        ownerUserId: user.id,
       },
     });
     testRepoId = repo.id;
@@ -68,12 +88,20 @@ describe('Phase 6: Web Dashboard Integration Tests', () => {
     await prisma.reviewSession.deleteMany({ where: { id: testSessionId } });
     await prisma.pullRequest.deleteMany({ where: { id: testPrId } });
     await prisma.repository.deleteMany({ where: { id: testRepoId } });
+    await prisma.user.deleteMany({ where: { id: testUserId } });
     await disconnectDatabase();
   });
 
   describe('Dashboard REST APIs', () => {
-    it('GET /api/dashboard/stats should return aggregated KPI metrics', async () => {
+    it('GET /api/dashboard/stats should require authentication', async () => {
       const res = await request(app).get('/api/dashboard/stats');
+      expect(res.status).toBe(401);
+    });
+
+    it('GET /api/dashboard/stats should return aggregated KPI metrics', async () => {
+      const res = await request(app)
+        .get('/api/dashboard/stats')
+        .set('Authorization', `Bearer ${testUserToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.stats).toBeDefined();
@@ -93,7 +121,9 @@ describe('Phase 6: Web Dashboard Integration Tests', () => {
     });
 
     it('GET /api/dashboard/prs should return pull requests with latest review sessions', async () => {
-      const res = await request(app).get('/api/dashboard/prs');
+      const res = await request(app)
+        .get('/api/dashboard/prs')
+        .set('Authorization', `Bearer ${testUserToken}`);
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.pullRequests)).toBe(true);
@@ -106,7 +136,9 @@ describe('Phase 6: Web Dashboard Integration Tests', () => {
     });
 
     it('GET /api/dashboard/prs with search query should filter pull requests', async () => {
-      const res = await request(app).get('/api/dashboard/prs?search=injection');
+      const res = await request(app)
+        .get('/api/dashboard/prs?search=injection')
+        .set('Authorization', `Bearer ${testUserToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.pullRequests.length).toBeGreaterThanOrEqual(1);

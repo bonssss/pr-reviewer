@@ -25,6 +25,15 @@ describe('Phase 7: End-to-End Pull Request Review Lifecycle Test', () => {
   beforeAll(async () => {
     await connectDatabase();
 
+    // Remove leftovers from an interrupted previous run.
+    await prisma.reviewComment.deleteMany({
+      where: { reviewSession: { pullRequest: { githubPrId: mockGithubPrId } } },
+    });
+    await prisma.reviewSession.deleteMany({
+      where: { pullRequest: { githubPrId: mockGithubPrId } },
+    });
+    await prisma.pullRequest.deleteMany({ where: { githubPrId: mockGithubPrId } });
+
     // 1. Create developer user
     const user = await prisma.user.upsert({
       where: { githubId: 'e2e_lead_developer' },
@@ -80,6 +89,19 @@ describe('Phase 7: End-to-End Pull Request Review Lifecycle Test', () => {
         installationId: installation.id,
         autoReviewEnabled: true,
       },
+    });
+
+    // The developer who installed the app must be linked to the installation
+    // before they can read or configure its repositories.
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { githubId: 'e2e_lead_developer' },
+    });
+    await prisma.userInstallation.upsert({
+      where: {
+        userId_installationId: { userId: user.id, installationId: installation.id },
+      },
+      update: {},
+      create: { userId: user.id, installationId: installation.id },
     });
 
     repoDbId = repo.id;
@@ -217,13 +239,17 @@ describe('Phase 7: End-to-End Pull Request Review Lifecycle Test', () => {
 
   it('Step 6: Dashboard APIs report updated metrics and review session details', async () => {
     // 1. Dashboard Overview Stats
-    const statsRes = await request(app).get('/api/dashboard/stats');
+    const statsRes = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${testUserToken}`);
     expect(statsRes.status).toBe(200);
     expect(statsRes.body.stats.totalReviews).toBeGreaterThanOrEqual(1);
     expect(statsRes.body.stats.criticalIssues).toBeGreaterThanOrEqual(1);
 
     // 2. Single Review Session Report
-    const sessionRes = await request(app).get(`/api/reviews/session/${reviewSessionId}`);
+    const sessionRes = await request(app)
+      .get(`/api/reviews/session/${reviewSessionId}`)
+      .set('Authorization', `Bearer ${testUserToken}`);
     expect(sessionRes.status).toBe(200);
     expect(sessionRes.body.session.id).toBe(reviewSessionId);
     expect(sessionRes.body.session.recommendation).toBe('REQUEST_CHANGES');
@@ -245,7 +271,13 @@ describe('Phase 7: End-to-End Pull Request Review Lifecycle Test', () => {
     expect(rerunRes.body.reviewSession.status).toBe('PENDING');
 
     // Verify historical audit trail
-    const history = await ReviewService.getPrReviewHistory(prDbId);
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { githubId: 'e2e_lead_developer' },
+    });
+    const history = await ReviewService.getPrReviewHistory(user.id, prDbId, {
+      limit: 50,
+      offset: 0,
+    });
     expect(history.length).toBeGreaterThanOrEqual(2);
   });
 });
