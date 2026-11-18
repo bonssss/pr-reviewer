@@ -1,0 +1,178 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum AccountType {
+  USER
+  ORGANIZATION
+}
+
+enum PullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum ReviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum ReviewRecommendation {
+  APPROVE
+  REQUEST_CHANGES
+  COMMENT
+}
+
+enum IssueSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum IssueCategory {
+  BUG
+  SECURITY
+  PERFORMANCE
+  CODE_STYLE
+  TEST_COVERAGE
+  BEST_PRACTICE
+}
+
+model User {
+  id           String       @id @default(uuid())
+  githubId     String       @unique
+  username     String
+  name         String?
+  email        String?
+  avatarUrl    String?
+  accessToken  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  repositories Repository[]
+
+  @@map("users")
+}
+
+model Installation {
+  id             String       @id @default(uuid())
+  installationId BigInt       @unique
+  accountName    String
+  accountType    AccountType  @default(USER)
+  targetId       BigInt?
+  permissions    Json?
+  isSuspended    Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  repositories   Repository[]
+
+  @@map("installations")
+}
+
+model Repository {
+  id                String       @id @default(uuid())
+  githubRepoId      BigInt       @unique
+  name              String
+  fullName          String       @unique // e.g. "octocat/Hello-World"
+  owner             String
+  isPrivate         Boolean      @default(false)
+  defaultBranch     String       @default("main")
+  webhookActive     Boolean      @default(true)
+  autoReviewEnabled Boolean      @default(true)
+  customPrompt      String?      @db.Text
+  installationId    String?
+  ownerUserId       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  installation      Installation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
+  ownerUser         User?         @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  pullRequests      PullRequest[]
+
+  @@map("repositories")
+}
+
+model PullRequest {
+  id             String           @id @default(uuid())
+  githubPrId     BigInt           @unique
+  number         Int
+  title          String
+  state          PullRequestState @default(OPEN)
+  baseBranch     String
+  headBranch     String
+  headSha        String
+  author         String
+  htmlUrl        String
+  diffUrl        String?
+  repoId         String
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  repository     Repository      @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  reviewSessions ReviewSession[]
+
+  @@unique([repoId, number])
+  @@map("pull_requests")
+}
+
+model ReviewSession {
+  id               String               @id @default(uuid())
+  prId             String
+  commitSha        String
+  status           ReviewStatus         @default(PENDING)
+  summary          String?              @db.Text
+  riskScore        Int?                 // 0 - 100
+  recommendation   ReviewRecommendation @default(COMMENT)
+  totalIssues      Int                  @default(0)
+  criticalIssues   Int                  @default(0)
+  highIssues       Int                  @default(0)
+  mediumIssues     Int                  @default(0)
+  lowIssues        Int                  @default(0)
+  aiModel          String?
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  executionTimeMs  Int?
+  rawAiResponse    Json?
+  errorMessage     String?              @db.Text
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  pullRequest      PullRequest          @relation(fields: [prId], references: [id], onDelete: Cascade)
+  comments         ReviewComment[]
+
+  @@index([prId, commitSha])
+  @@map("review_sessions")
+}
+
+model ReviewComment {
+  id                String        @id @default(uuid())
+  reviewSessionId   String
+  filePath          String
+  lineNumber        Int
+  side              String        @default("RIGHT") // "LEFT" or "RIGHT"
+  severity          IssueSeverity
+  category          IssueCategory
+  title             String
+  message           String        @db.Text
+  suggestion        String?       @db.Text
+  diffHunk          String?       @db.Text
+  githubCommentId   BigInt?
+  publishedToGithub Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+
+  reviewSession     ReviewSession @relation(fields: [reviewSessionId], references: [id], onDelete: Cascade)
+
+  @@index([reviewSessionId, filePath])
+  @@map("review_comments")
+}
