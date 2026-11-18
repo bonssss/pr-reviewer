@@ -36,7 +36,7 @@ describe('Phase 2: Authentication & Repository Management Integration Tests', ()
 
     // Create a mock test repository
     const repo = await prisma.repository.upsert({
-      where: { githubRepoId: BigInt(888999) },
+      where: { fullName: 'testdeveloper/sample-project' },
       update: {},
       create: {
         githubRepoId: BigInt(888999),

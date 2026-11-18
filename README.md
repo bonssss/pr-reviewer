@@ -2,12 +2,12 @@
 
 > Production-ready AI Pull Request Reviewer that automatically analyzes code changes, identifies bugs, security flaws, performance degradation, and code smells, and delivers actionable inline review comments directly on GitHub Pull Requests.
 
-![Node.js](https://img.shields.io/badge/Node.js-v22+-green.svg)
+![Node.js](https://img.shields.io/badge/Node.js-v24+-green.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)
 ![Prisma](https://img.shields.io/badge/Prisma-5.22-darkblue.svg)
 ![OpenAI](https://img.shields.io/badge/OpenAI-gpt--4o--mini-purple.svg)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)
+![Docker](https://img.shields.io/badge/Docker-Production--Ready-2496ED.svg)
 ![Tests](https://img.shields.io/badge/Tests-61%20Passed-brightgreen.svg)
 
 ---
@@ -25,12 +25,46 @@
   - Shields against prompt injection by treating all PR diffs as untrusted data.
 - **Duplicate Review Prevention:** Inspects existing PR review comments to avoid spamming duplicate comments across iterative review cycles.
 - **Developer Re-Review Workflow:** Developers can request fresh automated reviews on demand (`POST /api/reviews/pr/:prId/rerun`).
-- **Interactive Modern Web Dashboard:** Single-page application built directly into the server (`http://localhost:3000/dashboard`) with real-time KPI metrics, repository guidelines manager, PR review reports, and one-click code fix copy buttons.
+- **Separated Monorepo Architecture:** Clean separation into `backend/` and `frontend/` services with npm workspaces, unified CLI, and isolated multi-stage Docker builds.
+- **Interactive Modern Web Dashboard:** High-performance SPA with Vite build, Nginx reverse proxy, real-time KPI metrics, repository guidelines manager, and one-click code fix copy buttons.
 - **Full Relational Audit Trail:** PostgreSQL schema tracking Users, Installations, Repositories, Pull Requests, Review Sessions, and Review Comments.
 
 ---
 
-## 🏗️ Architecture Overview
+## 🏗️ Monorepo Architecture
+
+```
+pr-reviewer/
+├── backend/                  # Node.js 24 + Express + TypeScript Backend
+│   ├── src/
+│   │   ├── config/           # Zod environment validation & Pino logger
+│   │   ├── db/               # Prisma client & connection manager
+│   │   ├── modules/          # Auth, AI, GitHub, Repositories, Reviews, Dashboard
+│   │   ├── utils/            # Diff parser & noise filtering
+│   │   ├── webhooks/         # HMAC signature verifier & Webhook handlers
+│   │   └── workers/          # Async background queue processor
+│   ├── prisma/               # Database schema & migrations
+│   ├── tests/                # 61 Vitest unit, integration & E2E tests
+│   ├── Dockerfile            # Multi-stage production container with dumb-init
+│   ├── package.json
+│   └── tsconfig.json
+├── frontend/                 # Production Single Page Application Dashboard
+│   ├── dist/                 # Production-optimized Vite bundle
+│   ├── public/               # Static icons & manifest
+│   ├── index.html            # Dashboard UI
+│   ├── app.js                # State management, Charts, and API client
+│   ├── styles.css            # Dark mode styles & animations
+│   ├── nginx.conf            # High-performance Nginx reverse proxy
+│   ├── Dockerfile            # Multi-stage build + Nginx Alpine runner
+│   ├── vite.config.ts        # Vite development and proxy server
+│   └── package.json
+├── .github/
+│   └── workflows/
+│       └── ci.yml            # Automated CI/CD (lint, test, build)
+├── docker-compose.yml        # Production Docker Compose orchestration
+├── package.json              # Root npm workspaces orchestrator
+└── README.md
+```
 
 ```mermaid
 flowchart TD
@@ -40,13 +74,18 @@ flowchart TD
         GHReview[GitHub PR Review Comments]
     end
 
-    subgraph ServiceLayer["PR Reviewer Backend (Node.js + TypeScript)"]
+    subgraph Frontend["Frontend Service (Nginx / Vite)"]
+        UI["Modern Web Dashboard\n(Vite SPA on Port 80 / 5173)"]
+        NginxProxy["Nginx Reverse Proxy\n(Proxy /api/* to Backend)"]
+    end
+
+    subgraph Backend["Backend Service (Node.js 24 + Express)"]
         Ingress["Express Ingress\n(HMAC Signature Verification)"]
         WorkerQueue["Async Background Queue\n(review.worker.ts)"]
         DiffEngine["Diff Parser & Noise Filter\n(diff.parser.ts)"]
         AIEngine["AI Review Engine\n(OpenAI gpt-4o-mini + Zod Schema)"]
         Publisher["Review Publisher\n(Inline Comments & Duplicate Gate)"]
-        DashboardAPI["Dashboard REST API & SPA Server"]
+        API["REST APIs (/api/dashboard, /api/reviews, /api/repositories)"]
     end
 
     subgraph DataStorage["PostgreSQL Database (Prisma ORM)"]
@@ -60,137 +99,132 @@ flowchart TD
     WorkerQueue --> DiffEngine
     DiffEngine --> AIEngine
     AIEngine --> Publisher
-    AIEngine --> DB
-    Publisher -->|POST pulls/reviews| GHReview
-    DashboardAPI --> DB
+    Publisher -->|Create review & inline suggestions| GHReview
+
+    UI --> NginxProxy
+    NginxProxy --> API
+    Ingress <--> DB
+    WorkerQueue <--> DB
+    API <--> DB
 ```
 
 ---
 
-## 🚀 Quick Start Guide
+## 🚀 Quick Start
 
 ### 1. Prerequisites
-- **Node.js**: `v20.x` or higher
-- **PostgreSQL**: `v15.x` or higher (or Docker)
-- **OpenAI API Key**: (Optional for local development; a built-in heuristic review engine handles offline testing)
+- **Node.js:** v22 or v24+
+- **Docker & Docker Compose** (for containerized deployment)
+- **PostgreSQL 16+** (if running locally without Docker)
+- **GitHub App Credentials** (`APP_ID`, `PRIVATE_KEY`, `WEBHOOK_SECRET`)
+- **OpenAI API Key** (optional: automatic fallback engine provided for development and testing)
 
-### 2. Clone and Install Dependencies
+### 2. Installation
+Clone the repository and install all workspace dependencies from root:
 ```bash
 git clone https://github.com/bonssss/pr-reviewer.git
 cd pr-reviewer
 npm install
 ```
 
-### 3. Configure Environment Variables
+### 3. Environment Configuration
+Create a `.env` file inside `backend/`:
 ```bash
-cp .env.example .env
+cp backend/.env.example backend/.env
 ```
-Populate `.env` with your credentials:
-```env
-PORT=3000
+Fill in your configuration:
+```ini
 NODE_ENV=development
+PORT=3000
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pr_reviewer?schema=public"
-JWT_SECRET="your_secret_jwt_key_here"
+FRONTEND_URL="http://localhost:5173"
+JWT_SECRET="your_secure_jwt_secret"
 
 # GitHub App Settings
-GITHUB_APP_ID="123456"
-GITHUB_CLIENT_ID="your_client_id"
+GITHUB_APP_ID="5815976"
+GITHUB_CLIENT_ID="Iv23li5C9BcB9iGMBKGv"
 GITHUB_CLIENT_SECRET="your_client_secret"
 GITHUB_WEBHOOK_SECRET="your_webhook_secret"
-GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n..."
+GITHUB_PRIVATE_KEY_PATH="./your-private-key.pem"
 
-# OpenAI Settings
+# OpenAI Configuration
 OPENAI_API_KEY="sk-..."
 OPENAI_MODEL="gpt-4o-mini"
 ```
 
 ### 4. Database Setup
 ```bash
-# Option A: Start PostgreSQL with Docker
-docker-compose up -d postgres
-
-# Option B: Run local script
-./scripts/init-db.sh
-
-# Push Prisma schema to PostgreSQL
 npm run db:push
 ```
 
-### 5. Run Development Server
+### 5. Running in Development
+Run both backend and frontend concurrently:
 ```bash
-npm run dev
+npm run dev:all
 ```
-Open **[http://localhost:3000/dashboard](http://localhost:3000/dashboard)** in your browser!
+- **Backend API:** `http://localhost:3000`
+- **Frontend Dashboard:** `http://localhost:5173`
+- **API Health Check:** `http://localhost:3000/health`
 
----
-
-## 🧪 Comprehensive Test Suite
-
-The repository contains 61 unit, integration, and end-to-end tests covering all 7 phases:
-
+Alternatively, run each service individually:
 ```bash
-# Run all tests
-npm test
-
-# Type-check TypeScript code
-npm run lint
-
-# Build production bundle
-npm run build
+npm run dev:backend    # Runs backend on port 3000
+npm run dev:frontend   # Runs frontend on port 5173
 ```
 
 ---
 
-## 🐳 Docker Production Deployment
+## 🐳 Production Deployment with Docker Compose
 
-Run the complete multi-container stack with one command:
+To deploy the entire production stack (PostgreSQL, Backend, and Frontend Nginx) in one command:
+
 ```bash
-docker-compose up --build -d
+docker compose up -d --build
 ```
-This automatically initializes:
-- **`pr-reviewer-db`**: PostgreSQL container with persistent volume and automatic health checks.
-- **`pr-reviewer-api`**: Multi-stage production container running the compiled Node.js backend and dashboard.
 
----
-
-## 🔧 GitHub App Configuration Guide
-
-To receive webhooks and publish comments to your GitHub repositories:
-
-1. Go to **GitHub Settings &rarr; Developer settings &rarr; GitHub Apps &rarr; New GitHub App**.
-2. **Webhook URL**: `https://your-public-domain.com/api/webhooks/github` (or use Smee.io / ngrok for local testing).
-3. **Webhook Secret**: Paste the same secret entered in `GITHUB_WEBHOOK_SECRET`.
-4. **Permissions**:
-   - **Repository &rarr; Pull requests**: `Read & Write` (to fetch diffs and publish review comments)
-   - **Repository &rarr; Contents**: `Read-only`
-   - **Repository &rarr; Metadata**: `Read-only`
-5. **Subscribe to Events**:
-   - Check `Pull request`
-   - Check `Installation`
-   - Check `Installation target`
-6. Generate a **Private Key** (`.pem`), download it, and add it to `.env` as `GITHUB_PRIVATE_KEY`.
-7. Install the GitHub App on your repositories!
-
----
-
-## 📡 API Reference Summary
-
-| Method | Endpoint | Description | Auth |
+### Service Map:
+| Service | Internal Port | Host Port | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/dashboard` | Modern Web Dashboard SPA | Public |
-| `GET` | `/health` | Application and PostgreSQL health check | Public |
-| `POST` | `/api/webhooks/github` | GitHub Webhook receiver (HMAC-SHA256 verified) | GitHub Signature |
-| `GET` | `/api/dashboard/stats` | Aggregated metrics, issue counts, risk score | Optional |
-| `GET` | `/api/dashboard/prs` | Filterable pull request review list | Optional |
-| `GET` | `/api/repositories` | List connected repositories | Optional |
-| `PATCH` | `/api/repositories/:id` | Update auto-review toggle or custom AI guidelines | Required |
-| `GET` | `/api/reviews/session/:id` | View full AI review report and inline comments | Optional |
-| `GET` | `/api/reviews/pr/:id/history` | Historical review session timeline for a PR | Optional |
-| `POST` | `/api/reviews/pr/:id/rerun` | Request an on-demand re-review for a PR | Required |
-| `POST` | `/api/reviews/session/:id/publish` | Manually publish review comments to GitHub | Required |
+| **frontend** | `80` | `80` (or `5173`) | Nginx serving built SPA & proxying `/api` requests |
+| **backend** | `3000` | `3000` | Node.js 24 API runtime (non-root `node` user + dumb-init) |
+| **postgres** | `5432` | `5432` | PostgreSQL database with persistent volume & healthchecks |
+
+To stop the services:
+```bash
+docker compose down
+```
 
 ---
 
-## 🛡️ License
+## 🧪 Testing
 
-MIT License. Designed and built for engineering teams seeking reliable, high-precision automated code reviews.
+The test suite contains **61 automated tests** covering unit, integration, and full lifecycle E2E scenarios across all modules:
+
+```bash
+npm test
+```
+
+### Test Suite Coverage:
+- **Phase 1: Environment & Setup** - Environment loading, database connection, healthcheck endpoints.
+- **Phase 2: Auth & Repositories** - JWT signing/verifying, repository settings API, custom guidelines CRUD.
+- **Phase 3: Webhooks & Workers** - HMAC cryptographic validation, diff noise filtering, async queue worker.
+- **Phase 4: AI Engine** - Zod schema parsing, prompt formatting, heuristic fallback, issue categorization.
+- **Phase 5: Publishing & Automation** - Summary Markdown tables, inline ` ```suggestion ` formatting, duplicate comment suppression.
+- **Phase 6: Web Dashboard** - KPI metric calculations, PR explorer search, static UI serving.
+- **Phase 7: End-to-End PR Lifecycle** - Full mock webhook execution, AI review generation, database audit logging, and re-review request cycle.
+
+---
+
+## 🔒 Security Hardening
+
+- **Atomic State Transitions:** Prevents background workers and webhook jobs from conflicting using atomic PostgreSQL row-level checks (`status: { not: 'COMPLETED' }`).
+- **Timing Attack Resistance:** Uses `crypto.timingSafeEqual` for all webhook signature validations.
+- **Non-Root Containers:** Backend runs as non-root `node` user; frontend runs on hardened Nginx Alpine.
+- **PID 1 Signal Handling:** Backend uses `dumb-init` for graceful shutdown upon `SIGTERM` / `SIGINT`.
+- **Content Security & Headers:** Protected via `helmet` and strict Nginx security headers (`X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection`).
+- **Secret Isolation:** `.pem` private keys and `.env` files are strictly excluded via `.gitignore`.
+
+---
+
+## 📜 License
+MIT

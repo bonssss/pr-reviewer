@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Pull Request Reviewer - Dashboard</title>
+  <!-- Tailwind CSS CDN for instant styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+            },
+            dark: {
+              900: '#0d1117',
+              800: '#161b22',
+              700: '#21262d',
+              600: '#30363d',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="bg-[#090d13] text-gray-200 min-h-screen flex flex-col font-sans antialiased">
+  <!-- Top Navigation Bar -->
+  <header class="border-b border-dark-600 bg-dark-900/90 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="h-9 w-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xl shadow-inner">
+          🤖
+        </div>
+        <div>
+          <span class="font-bold text-lg text-white tracking-tight">AI PR Reviewer</span>
+          <span class="text-xs ml-2 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">v1.0.0</span>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="hidden md:flex space-x-1" id="nav-tabs">
+        <button onclick="switchTab('overview')" id="tab-btn-overview" class="tab-btn active px-4 py-2 rounded-md text-sm font-medium transition-colors">
+          Overview
+        </button>
+        <button onclick="switchTab('repositories')" id="tab-btn-repositories" class="tab-btn px-4 py-2 rounded-md text-sm font-medium transition-colors">
+          Repositories
+        </button>
+        <button onclick="switchTab('pull-requests')" id="tab-btn-pull-requests" class="tab-btn px-4 py-2 rounded-md text-sm font-medium transition-colors">
+          Pull Requests
+        </button>
+      </nav>
+
+      <!-- User Authentication & Action Menu -->
+      <div class="flex items-center space-x-3" id="auth-container">
+        <button onclick="loginWithGitHub()" id="btn-login" class="flex items-center space-x-2 bg-dark-700 hover:bg-dark-600 text-white text-xs font-medium px-3.5 py-2 rounded-lg border border-dark-600 transition shadow-sm">
+          <svg class="h-4 w-4 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span>Connect GitHub</span>
+        </button>
+        <div id="user-profile" class="hidden flex items-center space-x-2">
+          <img id="user-avatar" class="w-8 h-8 rounded-full border border-dark-600" src="" alt="Avatar">
+          <span id="user-name" class="text-xs font-medium text-gray-300"></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">
+    <!-- TAB 1: OVERVIEW -->
+    <section id="view-overview" class="tab-view space-y-8">
+      <!-- KPI Top Row -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div class="kpi-card p-5 rounded-xl bg-dark-800 border border-dark-600">
+          <span class="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Analyzed PRs</span>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span id="stat-total-prs" class="text-3xl font-extrabold text-white">0</span>
+            <span class="text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">Active</span>
+          </div>
+        </div>
+
+        <div class="kpi-card p-5 rounded-xl bg-dark-800 border border-dark-600">
+          <span class="text-xs font-semibold uppercase tracking-wider text-gray-400">Average Risk Score</span>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span id="stat-avg-risk" class="text-3xl font-extrabold text-white">0%</span>
+            <span id="stat-risk-badge" class="text-xs font-medium px-2 py-0.5 rounded bg-dark-700 text-gray-300">Low</span>
+          </div>
+        </div>
+
+        <div class="kpi-card p-5 rounded-xl bg-dark-800 border border-dark-600">
+          <span class="text-xs font-semibold uppercase tracking-wider text-gray-400">Critical Issues Blocked</span>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span id="stat-critical-issues" class="text-3xl font-extrabold text-rose-400">0</span>
+            <span class="text-xs font-medium text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded">Safety Gate</span>
+          </div>
+        </div>
+
+        <div class="kpi-card p-5 rounded-xl bg-dark-800 border border-dark-600">
+          <span class="text-xs font-semibold uppercase tracking-wider text-gray-400">Connected Repos</span>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span id="stat-total-repos" class="text-3xl font-extrabold text-white">0</span>
+            <button onclick="switchTab('repositories')" class="text-xs font-medium text-indigo-400 hover:underline">Manage &rarr;</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Severity Breakdown & Distribution -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-1 p-6 rounded-xl bg-dark-800 border border-dark-600 space-y-4">
+          <h3 class="text-base font-semibold text-white flex items-center justify-between">
+            <span>Issue Severity Breakdown</span>
+            <span id="stat-total-issues" class="text-xs font-normal text-gray-400">0 Total Issues</span>
+          </h3>
+
+          <div class="space-y-3">
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="flex items-center space-x-1.5"><span class="h-2 w-2 rounded-full bg-rose-500"></span><span class="text-gray-300">Critical</span></span>
+                <span id="stat-count-critical" class="font-mono text-gray-300 font-semibold">0</span>
+              </div>
+              <div class="w-full bg-dark-700 rounded-full h-1.5 overflow-hidden">
+                <div id="bar-critical" class="bg-rose-500 h-1.5 rounded-full" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="flex items-center space-x-1.5"><span class="h-2 w-2 rounded-full bg-amber-500"></span><span class="text-gray-300">High</span></span>
+                <span id="stat-count-high" class="font-mono text-gray-300 font-semibold">0</span>
+              </div>
+              <div class="w-full bg-dark-700 rounded-full h-1.5 overflow-hidden">
+                <div id="bar-high" class="bg-amber-500 h-1.5 rounded-full" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="flex items-center space-x-1.5"><span class="h-2 w-2 rounded-full bg-yellow-400"></span><span class="text-gray-300">Medium</span></span>
+                <span id="stat-count-medium" class="font-mono text-gray-300 font-semibold">0</span>
+              </div>
+              <div class="w-full bg-dark-700 rounded-full h-1.5 overflow-hidden">
+                <div id="bar-medium" class="bg-yellow-400 h-1.5 rounded-full" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="flex items-center space-x-1.5"><span class="h-2 w-2 rounded-full bg-blue-400"></span><span class="text-gray-300">Low / Style</span></span>
+                <span id="stat-count-low" class="font-mono text-gray-300 font-semibold">0</span>
+              </div>
+              <div class="w-full bg-dark-700 rounded-full h-1.5 overflow-hidden">
+                <div id="bar-low" class="bg-blue-400 h-1.5 rounded-full" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Reviews Timeline -->
+        <div class="lg:col-span-2 p-6 rounded-xl bg-dark-800 border border-dark-600">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-base font-semibold text-white">Recent Pull Request Reviews</h3>
+            <button onclick="loadDashboardData()" class="text-xs text-gray-400 hover:text-white flex items-center space-x-1">
+              <span>↻ Refresh</span>
+            </button>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="text-gray-400 border-b border-dark-600 uppercase tracking-wider">
+                <tr>
+                  <th class="py-2.5 px-3">Pull Request</th>
+                  <th class="py-2.5 px-3">Repository</th>
+                  <th class="py-2.5 px-3">Verdict</th>
+                  <th class="py-2.5 px-3">Risk</th>
+                  <th class="py-2.5 px-3">Issues</th>
+                  <th class="py-2.5 px-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="recent-reviews-table" class="divide-y divide-dark-700 text-gray-300">
+                <tr><td colspan="6" class="py-4 text-center text-gray-500">Loading reviews...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: REPOSITORIES -->
+    <section id="view-repositories" class="tab-view hidden space-y-6">
+      <div class="flex items-center justify-between border-b border-dark-700 pb-4">
+        <div>
+          <h2 class="text-xl font-bold text-white">Connected Repositories</h2>
+          <p class="text-xs text-gray-400 mt-1">Configure automated review rules and custom AI instructions per repository.</p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <a href="https://github.com/apps" target="_blank" class="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition shadow-sm">
+            + Install GitHub App
+          </a>
+        </div>
+      </div>
+
+      <div id="repositories-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- Injected via app.js -->
+      </div>
+    </section>
+
+    <!-- TAB 3: PULL REQUESTS -->
+    <section id="view-pull-requests" class="tab-view hidden space-y-6">
+      <div class="flex items-center justify-between border-b border-dark-700 pb-4">
+        <div>
+          <h2 class="text-xl font-bold text-white">Pull Requests Explorer</h2>
+          <p class="text-xs text-gray-400 mt-1">Review sessions, AI reports, and historical findings.</p>
+        </div>
+        <input type="text" id="pr-search-input" oninput="filterPullRequests()" placeholder="Search pull requests or author..." class="bg-dark-700 border border-dark-600 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-500 w-64">
+      </div>
+
+      <div class="overflow-x-auto rounded-xl border border-dark-600 bg-dark-800">
+        <table class="w-full text-left text-xs">
+          <thead class="text-gray-400 bg-dark-900/60 border-b border-dark-600 uppercase tracking-wider">
+            <tr>
+              <th class="py-3 px-4">Pull Request</th>
+              <th class="py-3 px-4">Repository</th>
+              <th class="py-3 px-4">Branches</th>
+              <th class="py-3 px-4">Review Status</th>
+              <th class="py-3 px-4">Verdict</th>
+              <th class="py-3 px-4">Risk Score</th>
+              <th class="py-3 px-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="pull-requests-table" class="divide-y divide-dark-700 text-gray-300">
+            <!-- Injected via app.js -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL: Full AI Review Report & Inline Comments -->
+  <div id="review-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <!-- Modal Header -->
+      <div class="p-6 border-b border-dark-700 flex items-center justify-between bg-dark-900/50">
+        <div>
+          <div class="flex items-center space-x-2">
+            <span id="modal-pr-number" class="text-emerald-400 font-mono font-bold text-sm">#--</span>
+            <h3 id="modal-pr-title" class="text-lg font-bold text-white">Pull Request Review</h3>
+          </div>
+          <p id="modal-repo-name" class="text-xs text-gray-400 mt-0.5">owner/repository</p>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button id="modal-btn-rerun" onclick="triggerReReview()" class="px-3 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-xs font-medium text-white border border-dark-600 transition flex items-center space-x-1">
+            <span>⚡ Request Re-Review</span>
+          </button>
+          <button onclick="closeReviewModal()" class="text-gray-400 hover:text-white text-xl p-1">&times;</button>
+        </div>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+        <!-- Verdict & Risk Banner -->
+        <div id="modal-verdict-banner" class="p-4 rounded-xl border flex items-center justify-between">
+          <div>
+            <span id="modal-recommendation" class="font-bold text-sm tracking-wide">STATUS</span>
+            <p id="modal-summary" class="text-xs text-gray-300 mt-1"></p>
+          </div>
+          <div class="text-right">
+            <span class="text-xs uppercase text-gray-400 font-semibold">Risk Score</span>
+            <div id="modal-risk-score" class="text-2xl font-black">--</div>
+          </div>
+        </div>
+
+        <!-- Issue Filter Tabs -->
+        <div>
+          <div class="flex items-center justify-between border-b border-dark-700 pb-2 mb-3">
+            <h4 class="font-bold text-sm text-white">Identified Issues (<span id="modal-issues-count">0</span>)</h4>
+            <div class="flex space-x-1" id="severity-filter-btns">
+              <button onclick="filterIssues('ALL')" class="px-2.5 py-1 rounded bg-dark-700 text-white text-[11px] font-medium">All</button>
+              <button onclick="filterIssues('CRITICAL')" class="px-2.5 py-1 rounded hover:bg-dark-700 text-rose-400 text-[11px] font-medium">Critical</button>
+              <button onclick="filterIssues('HIGH')" class="px-2.5 py-1 rounded hover:bg-dark-700 text-amber-400 text-[11px] font-medium">High</button>
+              <button onclick="filterIssues('MEDIUM')" class="px-2.5 py-1 rounded hover:bg-dark-700 text-yellow-300 text-[11px] font-medium">Medium</button>
+              <button onclick="filterIssues('LOW')" class="px-2.5 py-1 rounded hover:bg-dark-700 text-blue-300 text-[11px] font-medium">Low</button>
+            </div>
+          </div>
+
+          <div id="modal-issues-container" class="space-y-4">
+            <!-- Injected via app.js -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Edit Repository Custom Guidelines -->
+  <div id="repo-settings-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-dark-700 pb-3">
+        <h3 class="text-base font-bold text-white">Repository Review Settings</h3>
+        <button onclick="closeRepoModal()" class="text-gray-400 hover:text-white">&times;</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-gray-300 font-semibold mb-1">Custom Review Guidelines</label>
+          <p class="text-gray-400 text-[11px] mb-2">Provide instructions that the AI will enforce for every pull request in this repository (e.g. coding standards, security constraints, testing rules).</p>
+          <textarea id="modal-repo-prompt" rows="5" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-3 text-gray-200 focus:outline-none focus:border-emerald-500 font-mono text-xs" placeholder="e.g. Always check for proper SQL injection sanitization and ensure JSDoc comments are present on all exported functions."></textarea>
+        </div>
+
+        <div class="flex items-center justify-between pt-2">
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" id="modal-repo-auto-review" class="rounded bg-dark-900 border-dark-600 text-emerald-500 focus:ring-0">
+            <span class="text-gray-300">Enable Automated Review on PR open/update</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-2 border-t border-dark-700">
+        <button onclick="closeRepoModal()" class="px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:text-white text-xs">Cancel</button>
+        <button onclick="saveRepoSettings()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
