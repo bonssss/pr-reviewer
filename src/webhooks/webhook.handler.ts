@@ -82,10 +82,10 @@ export class WebhookHandler {
 
     // 1. Upsert Repository in database
     const dbRepo = await prisma.repository.upsert({
-      where: { githubRepoId: BigInt(repo.id) },
+      where: { fullName: repo.full_name },
       update: {
+        githubRepoId: BigInt(repo.id),
         name: repo.name,
-        fullName: repo.full_name,
         owner: repo.owner.login,
         isPrivate: repo.private,
         defaultBranch: repo.default_branch,
