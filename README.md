@@ -263,7 +263,9 @@ docker compose up --build
 | `GITHUB_CLIENT_ID` | yes | OAuth client id |
 | `GITHUB_CLIENT_SECRET` | yes | OAuth client secret |
 | `GITHUB_WEBHOOK_SECRET` | yes | ≥16 chars |
-| `OPENAI_API_KEY` | yes | OpenAI key |
+| `OPENAI_API_KEY` | yes | key for the configured AI provider |
+| `OPENAI_BASE_URL` | no | OpenAI-compatible endpoint (Gemini, Groq, Ollama); empty = OpenAI |
+| `OPENAI_MODEL` | no | model id (default `gpt-4o-mini`) |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_PATH` | one of | GitHub App key |
 | `BACKEND_URL`, `FRONTEND_URL` | recommended | public URLs |
 | `HTTP_PORT` | no | host port for the dashboard (default `80`) |
