@@ -80,6 +80,24 @@ export class WebhookHandler {
       return;
     }
 
+    // 0. Upsert Installation in database if present
+    let dbInstallationId: string | undefined;
+    if (installation?.id) {
+      const dbInstallation = await prisma.installation.upsert({
+        where: { installationId: BigInt(installation.id) },
+        update: {
+          accountName: repo.owner.login,
+          accountType: repo.owner.type === 'Organization' ? 'ORGANIZATION' : 'USER',
+        },
+        create: {
+          installationId: BigInt(installation.id),
+          accountName: repo.owner.login,
+          accountType: repo.owner.type === 'Organization' ? 'ORGANIZATION' : 'USER',
+        },
+      });
+      dbInstallationId = dbInstallation.id;
+    }
+
     // 1. Upsert Repository in database
     const dbRepo = await prisma.repository.upsert({
       where: { fullName: repo.full_name },
@@ -89,6 +107,7 @@ export class WebhookHandler {
         owner: repo.owner.login,
         isPrivate: repo.private,
         defaultBranch: repo.default_branch,
+        ...(dbInstallationId && { installationId: dbInstallationId }),
       },
       create: {
         githubRepoId: BigInt(repo.id),
@@ -99,6 +118,7 @@ export class WebhookHandler {
         defaultBranch: repo.default_branch,
         webhookActive: true,
         autoReviewEnabled: true,
+        ...(dbInstallationId && { installationId: dbInstallationId }),
       },
     });
 
