@@ -7,6 +7,7 @@ import { logger } from './config/logger.js';
 import { prisma } from './db/prisma.js';
 import { authRouter } from './modules/auth/index.js';
 import { repositoryRouter } from './modules/repositories/index.js';
+import { webhookRouter, RequestWithRawBody } from './webhooks/index.js';
 
 export function createApp(): Express {
   const app = express();
@@ -23,8 +24,15 @@ export function createApp(): Express {
   // Cookie parsing for session tokens
   app.use(cookieParser());
 
-  // Parse JSON payloads (Note: raw body preservation for webhooks will be wired in Phase 3)
-  app.use(express.json({ limit: '10mb' }));
+  // Parse JSON payloads preserving raw body buffer for HMAC webhook validation
+  app.use(
+    express.json({
+      limit: '10mb',
+      verify: (req: Request, _res: Response, buf: Buffer) => {
+        (req as RequestWithRawBody).rawBody = buf;
+      },
+    })
+  );
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // Basic request logging
@@ -64,9 +72,11 @@ export function createApp(): Express {
     }
   });
 
-  // API Domain Routers
+  // API Routers
   app.use('/api/auth', authRouter);
   app.use('/api/repositories', repositoryRouter);
+  app.use('/api/webhooks', webhookRouter);
+  app.use('/webhooks', webhookRouter); // Alias for GitHub Webhook URL flexibility
 
   // 404 Handler
   app.use((_req: Request, res: Response) => {
