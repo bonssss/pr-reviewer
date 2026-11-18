@@ -1,4 +1,5 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -8,13 +9,19 @@ import { prisma } from './db/prisma.js';
 import { authRouter } from './modules/auth/index.js';
 import { repositoryRouter } from './modules/repositories/index.js';
 import { reviewRouter } from './modules/reviews/index.js';
+import { dashboardRouter } from './modules/dashboard/index.js';
 import { webhookRouter, RequestWithRawBody } from './webhooks/index.js';
 
 export function createApp(): Express {
   const app = express();
 
-  // Security middlewares
-  app.use(helmet());
+  // Security middlewares (allowing scripts/styles for dashboard SPA)
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+    })
+  );
+
   app.use(
     cors({
       origin: [env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:5173'],
@@ -36,25 +43,19 @@ export function createApp(): Express {
   );
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+  // Serve static assets for modern web dashboard (disable automatic index.html on root)
+  const publicDir = path.resolve(process.cwd(), 'public');
+  app.use(express.static(publicDir, { index: false }));
+
   // Basic request logging
   app.use((req: Request, _res: Response, next: NextFunction) => {
     logger.debug({ method: req.method, url: req.url }, 'Incoming HTTP Request');
     next();
   });
 
-  // Base and Health Check Endpoints
-  app.get('/', (_req: Request, res: Response) => {
-    res.json({
-      name: 'AI-Powered GitHub Pull Request Reviewer API',
-      status: 'online',
-      version: '1.0.0',
-      timestamp: new Date().toISOString(),
-    });
-  });
-
+  // Health Check Endpoint
   app.get('/health', async (_req: Request, res: Response) => {
     try {
-      // Check database connection
       await prisma.$queryRaw`SELECT 1`;
 
       res.status(200).json({
@@ -73,10 +74,32 @@ export function createApp(): Express {
     }
   });
 
+  // Base route: returns Dashboard HTML when specifically requested by browser, or JSON metadata by default
+  app.get('/', (req: Request, res: Response) => {
+    const acceptHeader = req.headers.accept || '';
+    if (acceptHeader.includes('text/html') && !acceptHeader.includes('application/json') && !acceptHeader.includes('*/*')) {
+      res.sendFile(path.join(publicDir, 'index.html'));
+      return;
+    }
+
+    res.json({
+      name: 'AI-Powered GitHub Pull Request Reviewer API',
+      status: 'online',
+      version: '1.0.0',
+      dashboard: '/dashboard',
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  app.get('/dashboard', (_req: Request, res: Response) => {
+    res.sendFile(path.join(publicDir, 'index.html'));
+  });
+
   // API Routers
   app.use('/api/auth', authRouter);
   app.use('/api/repositories', repositoryRouter);
   app.use('/api/reviews', reviewRouter);
+  app.use('/api/dashboard', dashboardRouter);
   app.use('/api/webhooks', webhookRouter);
   app.use('/webhooks', webhookRouter); // Alias for GitHub Webhook URL flexibility
 
