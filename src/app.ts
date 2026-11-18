@@ -1,9 +1,12 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { prisma } from './db/prisma.js';
+import { authRouter } from './modules/auth/index.js';
+import { repositoryRouter } from './modules/repositories/index.js';
 
 export function createApp(): Express {
   const app = express();
@@ -16,6 +19,9 @@ export function createApp(): Express {
       credentials: true,
     })
   );
+
+  // Cookie parsing for session tokens
+  app.use(cookieParser());
 
   // Parse JSON payloads (Note: raw body preservation for webhooks will be wired in Phase 3)
   app.use(express.json({ limit: '10mb' }));
@@ -57,6 +63,10 @@ export function createApp(): Express {
       });
     }
   });
+
+  // API Domain Routers
+  app.use('/api/auth', authRouter);
+  app.use('/api/repositories', repositoryRouter);
 
   // 404 Handler
   app.use((_req: Request, res: Response) => {

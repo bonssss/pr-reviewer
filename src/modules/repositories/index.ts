@@ -1,2 +1,3 @@
-// Repository management module: connect/disconnect repos, toggle auto-review, custom guidelines (Phase 2 & 6)
-export {};
+export * from './repository.service.js';
+export * from './repository.controller.js';
+export * from './repository.routes.js';

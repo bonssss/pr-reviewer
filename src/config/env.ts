@@ -9,6 +9,7 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   FRONTEND_URL: z.string().default('http://localhost:5173'),
+  JWT_SECRET: z.string().default('development_jwt_secret_key_1234567890'),
 
   // GitHub App Settings
   GITHUB_APP_ID: z.string().optional().default(''),

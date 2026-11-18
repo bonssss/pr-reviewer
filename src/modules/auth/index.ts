@@ -1,2 +1,5 @@
-// Authentication module: handles GitHub OAuth, session management, and JWTs (Phase 2)
-export {};
+export * from './auth.types.js';
+export * from './auth.service.js';
+export * from './auth.middleware.js';
+export * from './auth.controller.js';
+export * from './auth.routes.js';
