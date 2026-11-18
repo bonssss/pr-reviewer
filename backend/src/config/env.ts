@@ -42,6 +42,12 @@ export const envSchema = z
 
     // OpenAI Settings
     OPENAI_API_KEY: z.string().optional().default(''),
+    // Optional OpenAI-compatible endpoint (Gemini, Groq, OpenRouter, Ollama…).
+    // Leave empty to use https://api.openai.com/v1.
+    OPENAI_BASE_URL: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+      z.string().url().optional()
+    ),
     OPENAI_MODEL: z.string().default('gpt-4o-mini'),
     OPENAI_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
     OPENAI_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(2),

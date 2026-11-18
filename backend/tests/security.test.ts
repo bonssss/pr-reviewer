@@ -924,6 +924,29 @@ describe('Security & Hardening', () => {
       vi.restoreAllMocks();
     });
 
+    it('accepts an OpenAI-compatible base URL and ignores an empty one', () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const gemini = parseEnv({
+        ...productionEnv,
+        OPENAI_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+        OPENAI_MODEL: 'gemini-2.5-flash',
+      });
+      expect(gemini.OPENAI_BASE_URL).toBe(
+        'https://generativelanguage.googleapis.com/v1beta/openai/'
+      );
+      expect(gemini.OPENAI_MODEL).toBe('gemini-2.5-flash');
+
+      const defaulted = parseEnv({ ...productionEnv, OPENAI_BASE_URL: '' });
+      expect(defaulted.OPENAI_BASE_URL).toBeUndefined();
+
+      expect(() =>
+        parseEnv({ ...productionEnv, OPENAI_BASE_URL: 'not-a-url' })
+      ).toThrow();
+
+      vi.restoreAllMocks();
+    });
+
     it('uses the JWT secret as encryption fallback outside production', () => {
       const parsed = parseEnv({
         NODE_ENV: 'development',

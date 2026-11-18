@@ -123,8 +123,24 @@ If `OPENAI_API_KEY` is missing, empty, or set to `mock_openai_api_key`, the
 backend does **not** call a model. It falls back to a deterministic offline
 heuristic engine that only flags hardcoded credentials, `eval()`, and
 `console.log`. Those reviews are labelled `heuristic-engine` and say so in the
-summary, so they are never mistaken for a full AI review. Set a real key to
-enable AI analysis.
+summary, so they are never mistaken for a full AI review.
+
+### AI provider
+
+The review engine speaks the OpenAI chat-completions format, so any
+OpenAI-compatible provider works. Set `OPENAI_BASE_URL` and `OPENAI_MODEL`
+alongside `OPENAI_API_KEY`:
+
+| Provider | `OPENAI_BASE_URL` | Example model |
+| --- | --- | --- |
+| OpenAI | *(empty)* | `gpt-4o-mini` |
+| Google Gemini (free tier) | `https://generativelanguage.googleapis.com/v1beta/openai/` | `gemini-2.5-flash` |
+| Groq (free tier) | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| OpenRouter | `https://openrouter.ai/api/v1` | any `:free` model id |
+| Ollama (local, no key) | `http://localhost:11434/v1` | `llama3.2` |
+
+The model must return JSON; the prompt already requests it and the response is
+validated against a strict schema.
 
 ### GitHub App setup
 

@@ -22,6 +22,13 @@ export class AIService {
       return this.openaiClient;
     }
 
+    // The test suite must stay hermetic and must not depend on whatever key
+    // happens to be in the developer's .env: tests exercise the deterministic
+    // heuristic engine instead of making billable network calls.
+    if (process.env.VITEST) {
+      return null;
+    }
+
     if (
       !env.OPENAI_API_KEY ||
       env.OPENAI_API_KEY.trim() === '' ||
@@ -32,6 +39,9 @@ export class AIService {
 
     this.openaiClient = new OpenAI({
       apiKey: env.OPENAI_API_KEY,
+      // Allows Gemini, Groq, OpenRouter or a local Ollama server, all of which
+      // expose an OpenAI-compatible chat completions API.
+      ...(env.OPENAI_BASE_URL ? { baseURL: env.OPENAI_BASE_URL } : {}),
       timeout: env.OPENAI_TIMEOUT_MS,
       maxRetries: env.OPENAI_MAX_RETRIES,
     });
