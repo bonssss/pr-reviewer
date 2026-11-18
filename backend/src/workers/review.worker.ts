@@ -60,9 +60,23 @@ export class ReviewWorker extends EventEmitter {
     try {
       logger.info({ job }, 'Starting background PR diff fetching and AI analysis');
 
-      // 1. Mark session as IN_PROGRESS
-      await prisma.reviewSession.update({
+      // Check if session is already completed
+      const existingSession = await prisma.reviewSession.findUnique({
         where: { id: job.reviewSessionId },
+        select: { status: true },
+      });
+
+      if (existingSession?.status === 'COMPLETED') {
+        logger.info({ reviewSessionId: job.reviewSessionId }, 'Review session already completed. Skipping job.');
+        return;
+      }
+
+      // 1. Mark session as IN_PROGRESS (only if not already completed)
+      await prisma.reviewSession.updateMany({
+        where: {
+          id: job.reviewSessionId,
+          status: { not: 'COMPLETED' },
+        },
         data: { status: 'IN_PROGRESS' },
       });
 
@@ -128,14 +142,22 @@ export class ReviewWorker extends EventEmitter {
       const errorMessage = error instanceof Error ? error.message : 'Unknown background review error';
       logger.error({ error, job }, 'PR review processing failed');
 
-      await prisma.reviewSession.update({
-        where: { id: job.reviewSessionId },
-        data: {
-          status: 'FAILED',
-          errorMessage,
-          executionTimeMs: Date.now() - startTime,
-        },
-      });
+      try {
+        // Atomic update: only mark as FAILED if not already COMPLETED
+        await prisma.reviewSession.updateMany({
+          where: {
+            id: job.reviewSessionId,
+            status: { not: 'COMPLETED' },
+          },
+          data: {
+            status: 'FAILED',
+            errorMessage,
+            executionTimeMs: Date.now() - startTime,
+          },
+        });
+      } catch (updateErr) {
+        logger.debug({ updateErr, reviewSessionId: job.reviewSessionId }, 'Failed to record failed status in DB (session may be cleaned up)');
+      }
 
       this.emit('job:failed', { job, error });
     } finally {

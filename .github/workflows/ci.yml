@@ -1,0 +1,64 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ master, dev, main ]
+  pull_request:
+    branches: [ master, dev, main ]
+
+jobs:
+  test-and-build:
+    name: Test and Build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_password
+          POSTGRES_DB: pr_reviewer_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run db:generate --workspace=backend
+
+      - name: Push Database Schema (Test DB)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres_password@localhost:5432/pr_reviewer_test?schema=public
+        run: npm run db:push --workspace=backend
+
+      - name: Typecheck Backend & Frontend
+        run: npm run lint
+
+      - name: Run Test Suite
+        env:
+          DATABASE_URL: postgresql://postgres:postgres_password@localhost:5432/pr_reviewer_test?schema=public
+          NODE_ENV: test
+          LOG_LEVEL: fatal
+        run: npm run test --workspace=backend
+
+      - name: Build Backend
+        run: npm run build:backend
+
+      - name: Build Frontend
+        run: npm run build:frontend

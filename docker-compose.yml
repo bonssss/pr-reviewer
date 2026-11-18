@@ -14,25 +14,27 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d pr_reviewer"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-pr_reviewer}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - pr-network
 
-  api:
+  backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
-    container_name: pr-reviewer-api
+    container_name: pr-reviewer-backend
     restart: always
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "${PORT:-3000}:${PORT:-3000}"
+      - "3000:3000"
     environment:
       NODE_ENV: production
-      PORT: ${PORT:-3000}
+      PORT: 3000
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pr_reviewer}?schema=public"
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
@@ -41,7 +43,41 @@ services:
       GITHUB_PRIVATE_KEY: ${GITHUB_PRIVATE_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:80}
+      JWT_SECRET: ${JWT_SECRET:-production_jwt_secret_change_me}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - pr-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pr-reviewer-frontend
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "5173:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - pr-network
+
+networks:
+  pr-network:
+    driver: bridge
 
 volumes:
   postgres_data:

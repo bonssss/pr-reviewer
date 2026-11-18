@@ -44,12 +44,12 @@ describe('Phase 5: Review Automation & GitHub Publishing Integration Tests', () 
     });
 
     const repo = await prisma.repository.upsert({
-      where: { githubRepoId: BigInt(99887711) },
+      where: { fullName: 'bonssss/test-repo-phase5' },
       update: {},
       create: {
         githubRepoId: BigInt(99887711),
-        name: 'pr-reviewer',
-        fullName: 'bonssss/pr-reviewer',
+        name: 'test-repo-phase5',
+        fullName: 'bonssss/test-repo-phase5',
         owner: 'bonssss',
         installationId: installation.id,
       },

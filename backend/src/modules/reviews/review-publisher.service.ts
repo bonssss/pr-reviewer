@@ -218,9 +218,9 @@ ${comment.message}`;
     // 5. Publish review using Octokit
     let githubReviewId: number | undefined;
 
-    // Check if real GitHub App credentials exist
+    // Check if real GitHub App credentials exist (use simulated publish in test environment)
     const privateKey = GitHubService.getPrivateKey();
-    if (privateKey && privateKey !== 'DUMMY_KEY') {
+    if (env.NODE_ENV !== 'test' && !process.env.VITEST && privateKey && privateKey !== 'DUMMY_KEY') {
       try {
         const octokit = GitHubService.getInstallationOctokit(installationId);
         const { data: reviewResponse } = await octokit.pulls.createReview({

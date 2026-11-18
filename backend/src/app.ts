@@ -1,5 +1,6 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import path from 'path';
+import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -43,9 +44,21 @@ export function createApp(): Express {
   );
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  // Serve static assets for modern web dashboard (disable automatic index.html on root)
-  const publicDir = path.resolve(process.cwd(), 'public');
-  app.use(express.static(publicDir, { index: false }));
+  // Determine static asset directory
+  const candidateDirs = [
+    path.resolve(process.cwd(), 'public'),
+    path.resolve(process.cwd(), 'backend/public'),
+    path.resolve(process.cwd(), 'frontend/public'),
+    path.resolve(process.cwd(), 'frontend/dist'),
+    path.resolve(process.cwd(), '../frontend/public'),
+    path.resolve(process.cwd(), '../frontend/dist'),
+  ];
+  const publicDir =
+    candidateDirs.find((dir) => fs.existsSync(path.join(dir, 'index.html'))) ||
+    path.resolve(process.cwd(), 'public');
+  if (fs.existsSync(publicDir)) {
+    app.use(express.static(publicDir, { index: false }));
+  }
 
   // Basic request logging
   app.use((req: Request, _res: Response, next: NextFunction) => {
@@ -77,8 +90,9 @@ export function createApp(): Express {
   // Base route: returns Dashboard HTML when specifically requested by browser, or JSON metadata by default
   app.get('/', (req: Request, res: Response) => {
     const acceptHeader = req.headers.accept || '';
-    if (acceptHeader.includes('text/html') && !acceptHeader.includes('application/json') && !acceptHeader.includes('*/*')) {
-      res.sendFile(path.join(publicDir, 'index.html'));
+    const indexPath = path.join(publicDir, 'index.html');
+    if (acceptHeader.includes('text/html') && !acceptHeader.includes('application/json') && !acceptHeader.includes('*/*') && fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
       return;
     }
 
@@ -92,7 +106,12 @@ export function createApp(): Express {
   });
 
   app.get('/dashboard', (_req: Request, res: Response) => {
-    res.sendFile(path.join(publicDir, 'index.html'));
+    const indexPath = path.join(publicDir, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.redirect(env.FRONTEND_URL);
+    }
   });
 
   // API Routers

@@ -1,5 +1,5 @@
 # Multi-stage Docker build for PR Reviewer Backend
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -17,7 +17,9 @@ RUN npx prisma generate
 RUN npm run build
 
 # Production image
-FROM node:22-alpine AS runner
+FROM node:24-alpine AS runner
+
+RUN apk add --no-cache dumb-init
 
 WORKDIR /app
 
@@ -30,6 +32,10 @@ RUN npm ci --omit=dev && npx prisma generate
 
 COPY --from=builder /app/dist ./dist
 
+# Security: run as non-root user
+USER node
+
 EXPOSE 3000
 
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["node", "dist/server.js"]
