@@ -1,11 +1,36 @@
 import { Router } from 'express';
 import { RepositoryController } from './repository.controller.js';
-import { optionalAuthenticateToken, authenticateToken } from '../auth/auth.middleware.js';
+import {
+  authenticateToken,
+  requireInstallationAccess,
+  requireRepositoryAccess,
+} from '../auth/auth.middleware.js';
+import { asyncHandler } from '../../utils/errors.js';
 
 export const repositoryRouter = Router();
 
-// Allow reading repositories with optional auth (for public repo dashboard view), but require auth for updates
-repositoryRouter.get('/', optionalAuthenticateToken, RepositoryController.getRepositories);
-repositoryRouter.get('/:id', optionalAuthenticateToken, RepositoryController.getRepository);
-repositoryRouter.patch('/:id', authenticateToken, RepositoryController.updateRepository);
-repositoryRouter.post('/sync/:installationId', authenticateToken, RepositoryController.syncRepositories);
+// Every repository endpoint is tenant scoped: no session, no data.
+repositoryRouter.use(authenticateToken);
+
+repositoryRouter.get(
+  '/',
+  asyncHandler(async (req, res) => RepositoryController.getRepositories(req, res))
+);
+
+repositoryRouter.post(
+  '/sync/:installationId',
+  requireInstallationAccess,
+  asyncHandler(async (req, res) => RepositoryController.syncRepositories(req, res))
+);
+
+repositoryRouter.get(
+  '/:id',
+  requireRepositoryAccess,
+  asyncHandler(async (req, res) => RepositoryController.getRepository(req, res))
+);
+
+repositoryRouter.patch(
+  '/:id',
+  requireRepositoryAccess,
+  asyncHandler(async (req, res) => RepositoryController.updateRepository(req, res))
+);

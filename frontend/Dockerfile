@@ -1,23 +1,31 @@
-# Production Multi-Stage Dockerfile for Frontend
+# syntax=docker/dockerfile:1
+
+# ---------------------------------------------------------------------------
+# Dashboard build (build context = repository root; npm workspace lockfile).
+# ---------------------------------------------------------------------------
 FROM node:24-alpine AS build
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+COPY package.json package-lock.json ./
+COPY backend/package.json ./backend/package.json
+COPY frontend/package.json ./frontend/package.json
+RUN npm ci --workspace=frontend --include-workspace-root
 
-COPY . .
-RUN npm run build
+COPY frontend ./frontend
+RUN npm run build --workspace=frontend
 
-# Nginx Alpine Production Server
-FROM nginx:alpine
+# ---------------------------------------------------------------------------
+# Static runtime
+# ---------------------------------------------------------------------------
+FROM nginx:1.27-alpine AS runner
 
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/frontend/dist /usr/share/nginx/html
 
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

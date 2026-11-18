@@ -12,19 +12,27 @@ describe('Phase 3: GitHub Webhooks & Diff Processing Integration Tests', () => {
 
   beforeAll(async () => {
     await connectDatabase();
+
+    // Remove leftovers from an interrupted previous run so assertions are stable.
+    await prisma.reviewComment.deleteMany({
+      where: { reviewSession: { pullRequest: { githubPrId: BigInt(777123) } } },
+    });
+    await prisma.reviewSession.deleteMany({
+      where: { pullRequest: { githubPrId: BigInt(777123) } },
+    });
+    await prisma.pullRequest.deleteMany({ where: { githubPrId: BigInt(777123) } });
+    await prisma.repository.deleteMany({ where: { githubRepoId: BigInt(999888) } });
+    await prisma.repository.deleteMany({ where: { githubRepoId: BigInt(666555) } });
   });
 
   afterAll(async () => {
     // Clean up test database records created during webhook tests
     await prisma.reviewSession.deleteMany({
-      where: { pullRequest: { repoId: 'test_repo_wh_123' } },
+      where: { pullRequest: { githubPrId: BigInt(777123) } },
     });
-    await prisma.pullRequest.deleteMany({
-      where: { repoId: 'test_repo_wh_123' },
-    });
-    await prisma.repository.deleteMany({
-      where: { id: 'test_repo_wh_123' },
-    });
+    await prisma.pullRequest.deleteMany({ where: { githubPrId: BigInt(777123) } });
+    await prisma.repository.deleteMany({ where: { githubRepoId: BigInt(999888) } });
+    await prisma.repository.deleteMany({ where: { githubRepoId: BigInt(666555) } });
     await disconnectDatabase();
   });
 

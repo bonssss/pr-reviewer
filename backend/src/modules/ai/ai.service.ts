@@ -32,6 +32,8 @@ export class AIService {
 
     this.openaiClient = new OpenAI({
       apiKey: env.OPENAI_API_KEY,
+      timeout: env.OPENAI_TIMEOUT_MS,
+      maxRetries: env.OPENAI_MAX_RETRIES,
     });
 
     return this.openaiClient;
@@ -92,10 +94,17 @@ export class AIService {
       totalTokens = 400;
     } else {
       try {
+        // Reasoning models reject `max_tokens`; older chat models reject
+        // `max_completion_tokens`. Pick the parameter the configured model expects.
+        const usesCompletionTokens = /^(o\d|gpt-5)/i.test(model);
+        const tokenLimit = usesCompletionTokens
+          ? { max_completion_tokens: env.MAX_TOKENS_PER_REVIEW }
+          : { max_tokens: env.MAX_TOKENS_PER_REVIEW };
+
         const response = await client.chat.completions.create({
           model,
           temperature: 0.2,
-          max_tokens: env.MAX_TOKENS_PER_REVIEW,
+          ...tokenLimit,
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: systemPrompt },

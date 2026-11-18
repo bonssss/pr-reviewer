@@ -56,6 +56,15 @@ describe('Phase 5: Review Automation & GitHub Publishing Integration Tests', () 
     });
     testRepoId = repo.id;
 
+    // Grant the user tenant access to this installation.
+    await prisma.userInstallation.upsert({
+      where: {
+        userId_installationId: { userId: user.id, installationId: installation.id },
+      },
+      update: {},
+      create: { userId: user.id, installationId: installation.id },
+    });
+
     const pr = await prisma.pullRequest.upsert({
       where: { githubPrId: BigInt(555444) },
       update: {},
@@ -184,7 +193,9 @@ describe('Phase 5: Review Automation & GitHub Publishing Integration Tests', () 
 
   describe('Review REST API Endpoints', () => {
     it('GET /api/reviews/session/:sessionId should return review report with comments', async () => {
-      const res = await request(app).get(`/api/reviews/session/${testSessionId}`);
+      const res = await request(app)
+        .get(`/api/reviews/session/${testSessionId}`)
+        .set('Authorization', `Bearer ${testUserToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.session).toBeDefined();
@@ -194,14 +205,25 @@ describe('Phase 5: Review Automation & GitHub Publishing Integration Tests', () 
       expect(res.body.session.comments.length).toBe(2);
     });
 
-    it('GET /api/reviews/session/:sessionId with invalid ID should return 404', async () => {
-      const res = await request(app).get('/api/reviews/session/non-existent-uuid-0000');
+    it('GET /api/reviews/session/:sessionId with unknown ID should return 404', async () => {
+      const res = await request(app)
+        .get('/api/reviews/session/00000000-0000-4000-8000-000000000000')
+        .set('Authorization', `Bearer ${testUserToken}`);
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('Review session not found');
     });
 
+    it('GET /api/reviews/session/:sessionId with malformed ID should return 400', async () => {
+      const res = await request(app)
+        .get('/api/reviews/session/non-existent-uuid-0000')
+        .set('Authorization', `Bearer ${testUserToken}`);
+      expect(res.status).toBe(400);
+    });
+
     it('GET /api/reviews/pr/:prId/history should return historical sessions', async () => {
-      const res = await request(app).get(`/api/reviews/pr/${testPrId}/history`);
+      const res = await request(app)
+        .get(`/api/reviews/pr/${testPrId}/history`)
+        .set('Authorization', `Bearer ${testUserToken}`);
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.history)).toBe(true);
@@ -225,7 +247,9 @@ describe('Phase 5: Review Automation & GitHub Publishing Integration Tests', () 
       expect(res.body.reviewSession.status).toBe('PENDING');
 
       // Check that historical sessions now have at least 2 sessions
-      const historyRes = await request(app).get(`/api/reviews/pr/${testPrId}/history`);
+      const historyRes = await request(app)
+        .get(`/api/reviews/pr/${testPrId}/history`)
+        .set('Authorization', `Bearer ${testUserToken}`);
       expect(historyRes.body.history.length).toBeGreaterThanOrEqual(2);
     });
 

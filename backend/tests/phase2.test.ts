@@ -120,8 +120,15 @@ describe('Phase 2: Authentication & Repository Management Integration Tests', ()
   });
 
   describe('Repository Management Endpoints', () => {
-    it('GET /api/repositories should return repository list', async () => {
+    it('GET /api/repositories should reject unauthenticated requests with 401', async () => {
       const res = await request(app).get('/api/repositories');
+      expect(res.status).toBe(401);
+    });
+
+    it('GET /api/repositories should return repository list', async () => {
+      const res = await request(app)
+        .get('/api/repositories')
+        .set('Authorization', `Bearer ${testUserToken}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.repositories)).toBe(true);
 
@@ -133,7 +140,9 @@ describe('Phase 2: Authentication & Repository Management Integration Tests', ()
     });
 
     it('GET /api/repositories/:id should return single repository details', async () => {
-      const res = await request(app).get(`/api/repositories/${testRepoId}`);
+      const res = await request(app)
+        .get(`/api/repositories/${testRepoId}`)
+        .set('Authorization', `Bearer ${testUserToken}`);
       expect(res.status).toBe(200);
       expect(res.body.repository).toBeDefined();
       expect(res.body.repository.id).toBe(testRepoId);
@@ -171,9 +180,18 @@ describe('Phase 2: Authentication & Repository Management Integration Tests', ()
     });
 
     it('GET /api/repositories/:id with unknown ID should return 404', async () => {
-      const res = await request(app).get('/api/repositories/non-existent-id-0000');
+      const res = await request(app)
+        .get('/api/repositories/00000000-0000-4000-8000-000000000000')
+        .set('Authorization', `Bearer ${testUserToken}`);
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('Repository not found');
+    });
+
+    it('GET /api/repositories/:id with a malformed ID should return 400', async () => {
+      const res = await request(app)
+        .get('/api/repositories/not-a-uuid')
+        .set('Authorization', `Bearer ${testUserToken}`);
+      expect(res.status).toBe(400);
     });
   });
 

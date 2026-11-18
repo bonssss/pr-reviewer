@@ -48,57 +48,80 @@ enum IssueCategory {
 }
 
 model User {
-  id           String       @id @default(uuid())
-  githubId     String       @unique
+  id           String   @id @default(uuid())
+  githubId     String   @unique
   username     String
   name         String?
   email        String?
   avatarUrl    String?
-  accessToken  String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  accessToken  String?  @db.Text // AES-256-GCM encrypted at rest (see utils/crypto.ts)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  repositories Repository[]
+  repositories  Repository[]
+  installations UserInstallation[]
 
+  @@index([username])
   @@map("users")
 }
 
 model Installation {
-  id             String       @id @default(uuid())
-  installationId BigInt       @unique
+  id             String      @id @default(uuid())
+  installationId BigInt      @unique
   accountName    String
-  accountType    AccountType  @default(USER)
+  accountType    AccountType @default(USER)
   targetId       BigInt?
   permissions    Json?
-  isSuspended    Boolean      @default(false)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  isSuspended    Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  repositories   Repository[]
+  repositories Repository[]
+  users        UserInstallation[]
 
+  @@index([accountName])
   @@map("installations")
 }
 
+/// Links a signed-in developer to the GitHub App installations they can access.
+/// This is the tenant boundary for every read/write operation.
+model UserInstallation {
+  id             String   @id @default(uuid())
+  userId         String
+  installationId String
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  installation Installation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, installationId])
+  @@index([installationId])
+  @@map("user_installations")
+}
+
 model Repository {
-  id                String       @id @default(uuid())
-  githubRepoId      BigInt       @unique
+  id                String   @id @default(uuid())
+  githubRepoId      BigInt   @unique
   name              String
-  fullName          String       @unique // e.g. "octocat/Hello-World"
+  fullName          String   @unique // e.g. "octocat/Hello-World"
   owner             String
-  isPrivate         Boolean      @default(false)
-  defaultBranch     String       @default("main")
-  webhookActive     Boolean      @default(true)
-  autoReviewEnabled Boolean      @default(true)
-  customPrompt      String?      @db.Text
+  isPrivate         Boolean  @default(false)
+  defaultBranch     String   @default("main")
+  webhookActive     Boolean  @default(true)
+  autoReviewEnabled Boolean  @default(true)
+  customPrompt      String?  @db.Text
   installationId    String?
   ownerUserId       String?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  installation      Installation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
-  ownerUser         User?         @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
-  pullRequests      PullRequest[]
+  installation Installation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
+  ownerUser    User?         @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  pullRequests PullRequest[]
 
+  @@index([installationId])
+  @@index([ownerUserId])
+  @@index([updatedAt])
   @@map("repositories")
 }
 
@@ -122,6 +145,8 @@ model PullRequest {
   reviewSessions ReviewSession[]
 
   @@unique([repoId, number])
+  @@index([repoId, updatedAt])
+  @@index([state])
   @@map("pull_requests")
 }
 
@@ -131,7 +156,7 @@ model ReviewSession {
   commitSha        String
   status           ReviewStatus         @default(PENDING)
   summary          String?              @db.Text
-  riskScore        Int?                 // 0 - 100
+  riskScore        Int? // 0 - 100
   recommendation   ReviewRecommendation @default(COMMENT)
   totalIssues      Int                  @default(0)
   criticalIssues   Int                  @default(0)
@@ -145,13 +170,18 @@ model ReviewSession {
   executionTimeMs  Int?
   rawAiResponse    Json?
   errorMessage     String?              @db.Text
+  attempts         Int                  @default(0)
+  githubReviewId   BigInt?
+  publishedAt      DateTime?
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 
-  pullRequest      PullRequest          @relation(fields: [prId], references: [id], onDelete: Cascade)
-  comments         ReviewComment[]
+  pullRequest PullRequest     @relation(fields: [prId], references: [id], onDelete: Cascade)
+  comments    ReviewComment[]
 
   @@index([prId, commitSha])
+  @@index([prId, createdAt])
+  @@index([status, createdAt])
   @@map("review_sessions")
 }
 
@@ -171,8 +201,24 @@ model ReviewComment {
   publishedToGithub Boolean       @default(false)
   createdAt         DateTime      @default(now())
 
-  reviewSession     ReviewSession @relation(fields: [reviewSessionId], references: [id], onDelete: Cascade)
+  reviewSession ReviewSession @relation(fields: [reviewSessionId], references: [id], onDelete: Cascade)
 
   @@index([reviewSessionId, filePath])
+  @@index([reviewSessionId, severity])
   @@map("review_comments")
+}
+
+/// Idempotency ledger for GitHub webhook deliveries. GitHub retries deliveries
+/// (for example after a timeout); we must never review the same delivery twice.
+model WebhookDelivery {
+  id          String    @id @default(uuid())
+  deliveryId  String    @unique
+  event       String
+  status      String    @default("RECEIVED") // RECEIVED | PROCESSED | FAILED
+  error       String?   @db.Text
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([receivedAt])
+  @@map("webhook_deliveries")
 }

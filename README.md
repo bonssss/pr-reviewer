@@ -1,230 +1,262 @@
 # 🤖 AI-Powered GitHub Pull Request Reviewer
 
-> Production-ready AI Pull Request Reviewer that automatically analyzes code changes, identifies bugs, security flaws, performance degradation, and code smells, and delivers actionable inline review comments directly on GitHub Pull Requests.
+An AI reviewer that analyses pull requests, finds bugs and security problems, and
+publishes actionable inline comments on GitHub. It ships with a tenant-aware
+REST API, a hardened webhook pipeline, an asynchronous review worker, and a
+small static dashboard.
 
-![Node.js](https://img.shields.io/badge/Node.js-v24+-green.svg)
+![Node.js](https://img.shields.io/badge/Node.js-24+-green.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)
 ![Prisma](https://img.shields.io/badge/Prisma-5.22-darkblue.svg)
 ![OpenAI](https://img.shields.io/badge/OpenAI-gpt--4o--mini-purple.svg)
-![Docker](https://img.shields.io/badge/Docker-Production--Ready-2496ED.svg)
-![Tests](https://img.shields.io/badge/Tests-61%20Passed-brightgreen.svg)
+![Tests](https://img.shields.io/badge/Tests-118%20Passed-brightgreen.svg)
 
 ---
 
-## 🌟 Core Features
+## Features
 
-- **GitHub App Integration:** Secure cryptographic HMAC-SHA256 signature verification (`X-Hub-Signature-256`) and per-installation Octokit token management.
-- **Smart Noise & Diff Filtering:** Automatically ignores generated lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Cargo.lock`), images, binary assets, and minified bundles to minimize token costs.
-- **Strict Production AI Guidelines:**
-  - Focuses strictly on actual changes in the diff.
-  - Zero speculative bug accusations.
-  - Generates drop-in GitHub code suggestion blocks (` ```suggestion `).
-  - Validates line numbers against actual modified patch hunks.
-  - Categorizes findings by severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`).
-  - Shields against prompt injection by treating all PR diffs as untrusted data.
-- **Duplicate Review Prevention:** Inspects existing PR review comments to avoid spamming duplicate comments across iterative review cycles.
-- **Developer Re-Review Workflow:** Developers can request fresh automated reviews on demand (`POST /api/reviews/pr/:prId/rerun`).
-- **Separated Monorepo Architecture:** Clean separation into `backend/` and `frontend/` services with npm workspaces, unified CLI, and isolated multi-stage Docker builds.
-- **Interactive Modern Web Dashboard:** High-performance SPA with Vite build, Nginx reverse proxy, real-time KPI metrics, repository guidelines manager, and one-click code fix copy buttons.
-- **Full Relational Audit Trail:** PostgreSQL schema tracking Users, Installations, Repositories, Pull Requests, Review Sessions, and Review Comments.
+- **GitHub App integration** — HMAC-SHA256 webhook verification on the raw
+  request body, per-installation Octokit tokens, installation lifecycle
+  handling (created / suspended / deleted).
+- **Idempotent webhooks** — every `X-GitHub-Delivery` is recorded in
+  `WebhookDelivery`; retries are acknowledged without triggering a second
+  review. Reviews are further de-duplicated per `(pull request, commit SHA)`.
+- **Asynchronous review worker** — bounded concurrency, retries with backoff,
+  stale-session recovery on startup, graceful shutdown, and no duplicate work
+  for the same commit.
+- **AI review pipeline** — diff parsing and filtering, prompt-injection
+  hardening, strict JSON schema validation, severity classification
+  (`CRITICAL` / `HIGH` / `MEDIUM` / `LOW`), and a timeout/retry budget.
+- **Secret filtering** — `.env`, key material, cloud credentials and
+  generated artefacts are stripped from the diff *before* it is sent to the AI
+  provider. Patches that still look like they contain credentials are dropped.
+- **Safe publishing** — markdown is escaped, suggestion blocks cannot break out
+  of their code fences, inline comments are validated against the diff, and
+  422 failures fall back to a single issue comment. Publishing is idempotent.
+- **Tenant isolation** — a user can only see repositories they own or that
+  belong to an installation they connected. Other tenants' resources return
+  `404`, never `403`.
+- **Security hardening** — HS256-pinned JWTs with fixed issuer/audience, OAuth
+  `state` CSRF protection, AES-256-GCM encryption of GitHub tokens at rest,
+  allow-listed CORS, strict CSP, rate limiting, trusted-origin checks for
+  cookie-authenticated state changes, and production env validation.
+- **Dashboard** — dependency-free vanilla JS, locally built Tailwind CSS (no
+  CDN, no inline scripts), sanitised rendering, an auth gate, and delegated
+  `data-action` handlers.
 
 ---
 
-## 🏗️ Monorepo Architecture
+## Repository layout
 
 ```
 pr-reviewer/
-├── backend/                  # Node.js 24 + Express + TypeScript Backend
+├── backend/                     # Express + TypeScript API
 │   ├── src/
-│   │   ├── config/           # Zod environment validation & Pino logger
-│   │   ├── db/               # Prisma client & connection manager
-│   │   ├── modules/          # Auth, AI, GitHub, Repositories, Reviews, Dashboard
-│   │   ├── utils/            # Diff parser & noise filtering
-│   │   ├── webhooks/         # HMAC signature verifier & Webhook handlers
-│   │   └── workers/          # Async background queue processor
-│   ├── prisma/               # Database schema & migrations
-│   ├── tests/                # 61 Vitest unit, integration & E2E tests
-│   ├── Dockerfile            # Multi-stage production container with dumb-init
-│   ├── package.json
-│   └── tsconfig.json
-├── frontend/                 # Production Single Page Application Dashboard
-│   ├── dist/                 # Production-optimized Vite bundle
-│   ├── public/               # Static icons & manifest
-│   ├── index.html            # Dashboard UI
-│   ├── app.js                # State management, Charts, and API client
-│   ├── styles.css            # Dark mode styles & animations
-│   ├── nginx.conf            # High-performance Nginx reverse proxy
-│   ├── Dockerfile            # Multi-stage build + Nginx Alpine runner
-│   ├── vite.config.ts        # Vite development and proxy server
-│   └── package.json
-├── .github/
-│   └── workflows/
-│       └── ci.yml            # Automated CI/CD (lint, test, build)
-├── docker-compose.yml        # Production Docker Compose orchestration
-├── package.json              # Root npm workspaces orchestrator
-└── README.md
+│   │   ├── config/              # env validation, logger, rate limiters
+│   │   ├── db/                  # Prisma client + connection manager
+│   │   ├── modules/
+│   │   │   ├── auth/            # OAuth, JWT, tenant access helpers
+│   │   │   ├── ai/              # OpenAI service, prompt builder, schemas
+│   │   │   ├── github/          # GitHub App client, diff fetching
+│   │   │   ├── repositories/    # repository list/sync/settings
+│   │   │   ├── reviews/         # review sessions + publisher
+│   │   │   └── dashboard/       # aggregate metrics & PR explorer
+│   │   ├── utils/               # diff parser, crypto, HTTP errors
+│   │   ├── webhooks/            # raw-body verifier & handlers
+│   │   └── workers/             # background review queue
+│   ├── prisma/
+│   │   ├── schema.prisma
+│   │   └── migrations/          # 0001_init (used by Docker production)
+│   └── tests/                   # Vitest unit / integration / security / e2e
+├── frontend/                    # Static dashboard (Vite + local Tailwind)
+│   ├── index.html
+│   ├── app.js
+│   ├── sanitize.js
+│   ├── styles.css
+│   ├── src/input.css            # Tailwind source
+│   ├── tailwind.config.js
+│   └── nginx.conf
+├── docker/backend-entrypoint.sh # prisma migrate deploy, then start API
+├── docker-compose.yml
+└── .github/workflows/ci.yml
 ```
 
-```mermaid
-flowchart TD
-    subgraph GitHubPlatform["GitHub Ecosystem"]
-        Dev[Developer opens/updates PR]
-        GHApp[GitHub App Webhooks]
-        GHReview[GitHub PR Review Comments]
-    end
+The repo is an **npm workspace monorepo**; `package-lock.json` lives at the
+root and Docker images are built from the repository root context.
 
-    subgraph Frontend["Frontend Service (Nginx / Vite)"]
-        UI["Modern Web Dashboard\n(Vite SPA on Port 80 / 5173)"]
-        NginxProxy["Nginx Reverse Proxy\n(Proxy /api/* to Backend)"]
-    end
+---
 
-    subgraph Backend["Backend Service (Node.js 24 + Express)"]
-        Ingress["Express Ingress\n(HMAC Signature Verification)"]
-        WorkerQueue["Async Background Queue\n(review.worker.ts)"]
-        DiffEngine["Diff Parser & Noise Filter\n(diff.parser.ts)"]
-        AIEngine["AI Review Engine\n(OpenAI gpt-4o-mini + Zod Schema)"]
-        Publisher["Review Publisher\n(Inline Comments & Duplicate Gate)"]
-        API["REST APIs (/api/dashboard, /api/reviews, /api/repositories)"]
-    end
+## Quick start (local)
 
-    subgraph DataStorage["PostgreSQL Database (Prisma ORM)"]
-        DB[("PostgreSQL\n• Repositories\n• PullRequests\n• ReviewSessions\n• ReviewComments")]
-    end
+Requirements: Node.js 24+, PostgreSQL 15+.
 
-    Dev -->|Push commits / Open PR| GHApp
-    GHApp -->|POST /api/webhooks/github| Ingress
-    Ingress -->|202 Accepted within 50ms| GHApp
-    Ingress -->|Enqueue| WorkerQueue
-    WorkerQueue --> DiffEngine
-    DiffEngine --> AIEngine
-    AIEngine --> Publisher
-    Publisher -->|Create review & inline suggestions| GHReview
+```bash
+npm ci
+cp backend/.env.example backend/.env     # then fill in the secrets
+npm run db:generate
+npm run db:push                          # or: npm run db:migrate
+npm run dev:all                          # backend :3000, dashboard :5173
+```
 
-    UI --> NginxProxy
-    NginxProxy --> API
-    Ingress <--> DB
-    WorkerQueue <--> DB
-    API <--> DB
+The backend also serves the dashboard source at `http://localhost:3000/dashboard`,
+which is convenient when you do not want to run Vite.
+
+### Environment
+
+All variables are validated with Zod at boot (`backend/src/config/env.ts`). In
+production the process refuses to start unless:
+
+- `JWT_SECRET` and `TOKEN_ENCRYPTION_KEY` are at least 32 characters and not
+  the development default,
+- `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
+  `GITHUB_WEBHOOK_SECRET` (≥16 chars) and `OPENAI_API_KEY` are set,
+- `GITHUB_PRIVATE_KEY` or `GITHUB_PRIVATE_KEY_PATH` is provided,
+- `FRONTEND_URL` uses `https://` (plain `http://localhost` is allowed for
+  local single-host deployments).
+
+See `backend/.env.example` for every option.
+
+### GitHub App setup
+
+1. Create a **GitHub App** (not a separate OAuth App) and note its **App ID**,
+   **Client ID**, **Client secret**, and generate a **private key**. Use the
+   credentials shown on the GitHub App page — GitHub Apps provide their own
+   OAuth client ID/secret, and mixing them with a separate OAuth App's
+   credentials causes GitHub to return `invalid_client`.
+2. Set the OAuth callback URL to
+   `${BACKEND_URL}/api/auth/github/callback`.
+3. Set the webhook URL to `${BACKEND_URL}/api/webhooks/github` and choose a
+   webhook secret.
+4. Grant read access to contents, pull requests and metadata.
+5. Put the values in `backend/.env`, install the app on a repository, and sign
+   in through the dashboard.
+
+---
+
+## API overview
+
+All data endpoints require a session (httpOnly `token` cookie or
+`Authorization: Bearer <jwt>`).
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| `GET` | `/health` | Liveness + database probe |
+| `GET` | `/api/auth/github` | Start OAuth (state cookie) |
+| `GET/POST` | `/api/auth/github/callback` | Finish OAuth, set session cookie |
+| `GET` | `/api/auth/me` | Current user |
+| `POST` | `/api/auth/logout` | Clear session (trusted origin required) |
+| `GET` | `/api/repositories` | List accessible repositories |
+| `POST` | `/api/repositories/sync/:installationId` | Sync installation repos |
+| `GET` | `/api/repositories/:id` | Repository details + metrics |
+| `PATCH` | `/api/repositories/:id` | Update prompt / auto-review |
+| `GET` | `/api/reviews/session/:sessionId` | Full review report |
+| `GET` | `/api/reviews/pr/:prId/history` | Review history for a PR |
+| `POST` | `/api/reviews/pr/:prId/rerun` | Queue a new review |
+| `POST` | `/api/reviews/session/:sessionId/publish` | Re-publish a review |
+| `GET` | `/api/dashboard/stats` | Aggregate metrics |
+| `GET` | `/api/dashboard/prs` | PR explorer feed |
+| `POST` | `/api/webhooks/github` | GitHub webhook receiver |
+
+Errors use a consistent shape:
+
+```json
+{ "error": "Not Found", "code": "NOT_FOUND" }
 ```
 
 ---
 
-## 🚀 Quick Start
+## Database
 
-### 1. Prerequisites
-- **Node.js:** v22 or v24+
-- **Docker & Docker Compose** (for containerized deployment)
-- **PostgreSQL 16+** (if running locally without Docker)
-- **GitHub App Credentials** (`APP_ID`, `PRIVATE_KEY`, `WEBHOOK_SECRET`)
-- **OpenAI API Key** (optional: automatic fallback engine provided for development and testing)
+- Development / CI / tests use `prisma db push`.
+- Production (Docker) uses the committed migration:
 
-### 2. Installation
-Clone the repository and install all workspace dependencies from root:
 ```bash
-git clone https://github.com/bonssss/pr-reviewer.git
-cd pr-reviewer
-npm install
+npm run db:deploy     # prisma migrate deploy
 ```
 
-### 3. Environment Configuration
-Create a `.env` file inside `backend/`:
-```bash
-cp backend/.env.example backend/.env
-```
-Fill in your configuration:
-```ini
-NODE_ENV=development
-PORT=3000
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pr_reviewer?schema=public"
-FRONTEND_URL="http://localhost:5173"
-JWT_SECRET="your_secure_jwt_secret"
+The backend container runs `prisma migrate deploy` automatically before the API
+starts (`RUN_MIGRATIONS=false` disables this if migrations are applied by a
+separate release job).
 
-# GitHub App Settings
-GITHUB_APP_ID="5815976"
-GITHUB_CLIENT_ID="Iv23li5C9BcB9iGMBKGv"
-GITHUB_CLIENT_SECRET="your_client_secret"
-GITHUB_WEBHOOK_SECRET="your_webhook_secret"
-GITHUB_PRIVATE_KEY_PATH="./your-private-key.pem"
-
-# OpenAI Configuration
-OPENAI_API_KEY="sk-..."
-OPENAI_MODEL="gpt-4o-mini"
-```
-
-### 4. Database Setup
-```bash
-npm run db:push
-```
-
-### 5. Running in Development
-Run both backend and frontend concurrently:
-```bash
-npm run dev:all
-```
-- **Backend API:** `http://localhost:3000`
-- **Frontend Dashboard:** `http://localhost:5173`
-- **API Health Check:** `http://localhost:3000/health`
-
-Alternatively, run each service individually:
-```bash
-npm run dev:backend    # Runs backend on port 3000
-npm run dev:frontend   # Runs frontend on port 5173
-```
+Tokens are stored encrypted (`v1.<iv>.<tag>.<ciphertext>`, AES-256-GCM).
+Legacy plaintext values are still readable and get re-encrypted the next time
+the user signs in.
 
 ---
 
-## 🐳 Production Deployment with Docker Compose
-
-To deploy the entire production stack (PostgreSQL, Backend, and Frontend Nginx) in one command:
+## Testing
 
 ```bash
-docker compose up -d --build
+npm test                     # backend Vitest suite
+npm run lint                 # backend tsc --noEmit + frontend syntax checks
+npm run build:backend
+npm run build:frontend
 ```
 
-### Service Map:
-| Service | Internal Port | Host Port | Description |
-| :--- | :--- | :--- | :--- |
-| **frontend** | `80` | `80` (or `5173`) | Nginx serving built SPA & proxying `/api` requests |
-| **backend** | `3000` | `3000` | Node.js 24 API runtime (non-root `node` user + dumb-init) |
-| **postgres** | `5432` | `5432` | PostgreSQL database with persistent volume & healthchecks |
+The suite runs with `--fileParallelism=false` because it uses one PostgreSQL
+database. It is hermetic with respect to third parties: `GitHubService` reports
+itself unconfigured and the review worker short-circuits under `VITEST`, so no
+GitHub or OpenAI calls are made.
 
-To stop the services:
-```bash
-docker compose down
-```
+Coverage includes:
+
+- HMAC verification, webhook idempotency, retry and lifecycle transitions,
+- tenant isolation (cross-tenant reads/writes return 404),
+- JWT algorithm/issuer/audience/expiry pinning, `alg:none` rejection,
+- AES-GCM round-trip, tamper detection and legacy passthrough,
+- diff secret filtering and inline-comment line validation,
+- publisher idempotency and suggestion-fence escaping,
+- production env validation, rate limiting, CSRF origin checks,
+- CSP/CORS/error-shape hardening,
+- frontend HTML escaping and URL sanitisation.
 
 ---
 
-## 🧪 Testing
-
-The test suite contains **61 automated tests** covering unit, integration, and full lifecycle E2E scenarios across all modules:
+## Docker
 
 ```bash
-npm test
+cp .env.docker.example .env      # fill in every required value
+docker compose up --build
 ```
 
-### Test Suite Coverage:
-- **Phase 1: Environment & Setup** - Environment loading, database connection, healthcheck endpoints.
-- **Phase 2: Auth & Repositories** - JWT signing/verifying, repository settings API, custom guidelines CRUD.
-- **Phase 3: Webhooks & Workers** - HMAC cryptographic validation, diff noise filtering, async queue worker.
-- **Phase 4: AI Engine** - Zod schema parsing, prompt formatting, heuristic fallback, issue categorization.
-- **Phase 5: Publishing & Automation** - Summary Markdown tables, inline ` ```suggestion ` formatting, duplicate comment suppression.
-- **Phase 6: Web Dashboard** - KPI metric calculations, PR explorer search, static UI serving.
-- **Phase 7: End-to-End PR Lifecycle** - Full mock webhook execution, AI review generation, database audit logging, and re-review request cycle.
+- `postgres` is not published to the host; only the backend can reach it.
+- `backend` is not published either; the `frontend` Nginx container proxies
+  `/api/*` and `/health` to it and publishes `${HTTP_PORT:-80}`.
+- The backend applies migrations on startup and runs as the unprivileged
+  `node` user.
+- Both images are built from the repository root (workspace lockfile) and are
+  built in CI on every push/PR.
+
+| Variable | Required | Notes |
+| -------- | -------- | ----- |
+| `POSTGRES_PASSWORD` | yes | database password |
+| `JWT_SECRET` | yes | ≥32 chars |
+| `TOKEN_ENCRYPTION_KEY` | yes | ≥32 chars |
+| `GITHUB_APP_ID` | yes | GitHub App id |
+| `GITHUB_CLIENT_ID` | yes | OAuth client id |
+| `GITHUB_CLIENT_SECRET` | yes | OAuth client secret |
+| `GITHUB_WEBHOOK_SECRET` | yes | ≥16 chars |
+| `OPENAI_API_KEY` | yes | OpenAI key |
+| `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_PATH` | one of | GitHub App key |
+| `BACKEND_URL`, `FRONTEND_URL` | recommended | public URLs |
+| `HTTP_PORT` | no | host port for the dashboard (default `80`) |
 
 ---
 
-## 🔒 Security Hardening
+## Security notes
 
-- **Atomic State Transitions:** Prevents background workers and webhook jobs from conflicting using atomic PostgreSQL row-level checks (`status: { not: 'COMPLETED' }`).
-- **Timing Attack Resistance:** Uses `crypto.timingSafeEqual` for all webhook signature validations.
-- **Non-Root Containers:** Backend runs as non-root `node` user; frontend runs on hardened Nginx Alpine.
-- **PID 1 Signal Handling:** Backend uses `dumb-init` for graceful shutdown upon `SIGTERM` / `SIGINT`.
-- **Content Security & Headers:** Protected via `helmet` and strict Nginx security headers (`X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection`).
-- **Secret Isolation:** `.pem` private keys and `.env` files are strictly excluded via `.gitignore`.
+- Never commit `.env` files or `*.pem` keys; `.dockerignore` and `.gitignore`
+  exclude them from images and git.
+- Rotate `JWT_SECRET`, `TOKEN_ENCRYPTION_KEY`, `GITHUB_WEBHOOK_SECRET` and the
+  GitHub App private key if they are ever exposed.
+- Rotating `TOKEN_ENCRYPTION_KEY` makes existing stored tokens unreadable;
+  affected users simply sign in again.
+- The dashboard never renders untrusted API data as HTML without escaping and
+  only turns absolute `https://` URLs into links.
 
 ---
 
-## 📜 License
+## License
+
 MIT

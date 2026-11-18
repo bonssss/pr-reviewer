@@ -1,76 +1,111 @@
-import express, { Express, Request, Response, NextFunction } from 'express';
+import express, { Express, NextFunction, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import { env } from './config/env.js';
+import { ZodError } from 'zod';
+import { env, getAllowedOrigins } from './config/env.js';
 import { logger } from './config/logger.js';
 import { prisma } from './db/prisma.js';
 import { authRouter } from './modules/auth/index.js';
 import { repositoryRouter } from './modules/repositories/index.js';
 import { reviewRouter } from './modules/reviews/index.js';
 import { dashboardRouter } from './modules/dashboard/index.js';
-import { webhookRouter, RequestWithRawBody } from './webhooks/index.js';
+import { webhookRouter } from './webhooks/index.js';
+import { apiRateLimiter } from './config/rate-limit.js';
+import { AppError, mapPrismaError } from './utils/errors.js';
+
+const STATIC_ASSET_RE = /\.(?:js|mjs|css|svg|png|jpe?g|gif|ico|webp|woff2?|ttf|eot|map|webmanifest)$/i;
+
+function resolveFrontendDir(): string | null {
+  const candidates = [
+    path.resolve(process.cwd(), 'frontend', 'dist'),
+    path.resolve(process.cwd(), '../frontend/dist'),
+    path.resolve(process.cwd(), 'frontend'),
+    path.resolve(process.cwd(), '../frontend'),
+  ];
+
+  return (
+    candidates.find(
+      (dir) => fs.existsSync(path.join(dir, 'index.html')) && fs.existsSync(path.join(dir, 'app.js'))
+    ) ??
+    candidates.find((dir) => fs.existsSync(path.join(dir, 'index.html'))) ??
+    null
+  );
+}
 
 export function createApp(): Express {
   const app = express();
 
-  // Security middlewares (allowing scripts/styles for dashboard SPA)
+  app.disable('x-powered-by');
+  app.set('trust proxy', env.TRUST_PROXY);
+
+  // Strict security headers. The dashboard has no inline scripts or inline
+  // event handlers, so `script-src 'self'` is safe. Inline *style attributes*
+  // are still used for progress bars, hence 'unsafe-inline' for styles only.
   app.use(
     helmet({
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: [
+            "'self'",
+            'data:',
+            'https://avatars.githubusercontent.com',
+            'https://*.githubusercontent.com',
+          ],
+          connectSrc: ["'self'"],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          frameAncestors: ["'none'"],
+          formAction: ["'self'"],
+        },
+      },
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      crossOriginResourcePolicy: { policy: 'same-site' },
     })
   );
+
+  const allowedOrigins = new Set(getAllowedOrigins());
 
   app.use(
     cors({
-      origin: [env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:5173'],
+      origin(origin, callback) {
+        // Non-browser clients (curl, GitHub webhooks) send no Origin header.
+        if (!origin || allowedOrigins.has(origin)) {
+          callback(null, true);
+          return;
+        }
+        callback(null, false);
+      },
       credentials: true,
+      methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Hub-Signature-256',
+        'X-GitHub-Event',
+        'X-GitHub-Delivery',
+      ],
+      maxAge: 600,
     })
   );
 
-  // Cookie parsing for session tokens
   app.use(cookieParser());
 
-  // Parse JSON payloads preserving raw body buffer for HMAC webhook validation
-  app.use(
-    express.json({
-      limit: '10mb',
-      verify: (req: Request, _res: Response, buf: Buffer) => {
-        (req as RequestWithRawBody).rawBody = buf;
-      },
-    })
-  );
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-  // Determine static asset directory
-  const candidateDirs = [
-    path.resolve(process.cwd(), 'public'),
-    path.resolve(process.cwd(), 'backend/public'),
-    path.resolve(process.cwd(), 'frontend/public'),
-    path.resolve(process.cwd(), 'frontend/dist'),
-    path.resolve(process.cwd(), '../frontend/public'),
-    path.resolve(process.cwd(), '../frontend/dist'),
-  ];
-  const publicDir =
-    candidateDirs.find((dir) => fs.existsSync(path.join(dir, 'index.html'))) ||
-    path.resolve(process.cwd(), 'public');
-  if (fs.existsSync(publicDir)) {
-    app.use(express.static(publicDir, { index: false }));
-  }
-
-  // Basic request logging
   app.use((req: Request, _res: Response, next: NextFunction) => {
-    logger.debug({ method: req.method, url: req.url }, 'Incoming HTTP Request');
+    logger.debug({ method: req.method, url: req.url }, 'Incoming HTTP request');
     next();
   });
 
-  // Health Check Endpoint
+  // Health check before body parsing: it must stay cheap and never leak internals.
   app.get('/health', async (_req: Request, res: Response) => {
     try {
       await prisma.$queryRaw`SELECT 1`;
-
       res.status(200).json({
         status: 'healthy',
         database: 'connected',
@@ -79,19 +114,42 @@ export function createApp(): Express {
       });
     } catch (error) {
       logger.error({ error }, 'Health check failed');
-      res.status(503).json({
-        status: 'unhealthy',
-        database: 'disconnected',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
+      res.status(503).json({ status: 'unhealthy', database: 'disconnected' });
     }
   });
 
-  // Base route: returns Dashboard HTML when specifically requested by browser, or JSON metadata by default
+  // Webhooks must receive the raw bytes for HMAC verification, so they are
+  // mounted BEFORE the global JSON parser. The router parses JSON itself.
+  app.use('/api/webhooks', webhookRouter);
+  app.use('/webhooks', webhookRouter);
+
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: false, limit: '100kb' }));
+
+  // Dashboard source files are public, everything else in the repo is not.
+  const frontendDir = resolveFrontendDir();
+  if (frontendDir) {
+    const staticHandler = express.static(frontendDir, {
+      index: false,
+      dotfiles: 'deny',
+      maxAge: env.NODE_ENV === 'production' ? '1h' : 0,
+    });
+
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      if ((req.method === 'GET' || req.method === 'HEAD') && STATIC_ASSET_RE.test(req.path)) {
+        staticHandler(req, res, next);
+        return;
+      }
+      next();
+    });
+  }
+
   app.get('/', (req: Request, res: Response) => {
-    const acceptHeader = req.headers.accept || '';
-    const indexPath = path.join(publicDir, 'index.html');
-    if (acceptHeader.includes('text/html') && !acceptHeader.includes('application/json') && !acceptHeader.includes('*/*') && fs.existsSync(indexPath)) {
+    const accept = req.headers.accept ?? '';
+    const indexPath = frontendDir ? path.join(frontendDir, 'index.html') : null;
+    const wantsHtml = accept.includes('text/html');
+
+    if (wantsHtml && indexPath && fs.existsSync(indexPath)) {
       res.sendFile(indexPath);
       return;
     }
@@ -106,36 +164,75 @@ export function createApp(): Express {
   });
 
   app.get('/dashboard', (_req: Request, res: Response) => {
-    const indexPath = path.join(publicDir, 'index.html');
-    if (fs.existsSync(indexPath)) {
+    const indexPath = frontendDir ? path.join(frontendDir, 'index.html') : null;
+    if (indexPath && fs.existsSync(indexPath)) {
       res.sendFile(indexPath);
     } else {
       res.redirect(env.FRONTEND_URL);
     }
   });
 
-  // API Routers
+  app.use('/api', apiRateLimiter);
+
   app.use('/api/auth', authRouter);
   app.use('/api/repositories', repositoryRouter);
   app.use('/api/reviews', reviewRouter);
   app.use('/api/dashboard', dashboardRouter);
-  app.use('/api/webhooks', webhookRouter);
-  app.use('/webhooks', webhookRouter); // Alias for GitHub Webhook URL flexibility
 
-  // 404 Handler
   app.use((_req: Request, res: Response) => {
     res.status(404).json({
       error: 'Not Found',
+      code: 'NOT_FOUND',
       message: 'The requested resource does not exist.',
     });
   });
 
-  // Global Error Handler
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+
+    const appError = err instanceof AppError ? err : mapPrismaError(err);
+
+    if (appError) {
+      res.status(appError.statusCode).json({
+        error: appError.message,
+        code: appError.code,
+        ...(appError.details !== undefined ? { details: appError.details } : {}),
+      });
+      return;
+    }
+
+    if (err instanceof ZodError) {
+      res.status(400).json({
+        error: 'Validation failed',
+        code: 'BAD_REQUEST',
+        details: err.flatten(),
+      });
+      return;
+    }
+
+    const expressError = err as { type?: string; message?: string; status?: number };
+
+    if (expressError?.type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'Malformed JSON request body', code: 'BAD_REQUEST' });
+      return;
+    }
+
+    if (expressError?.type === 'entity.too.large') {
+      res.status(413).json({ error: 'Request body too large', code: 'PAYLOAD_TOO_LARGE' });
+      return;
+    }
+
     logger.error({ err }, 'Unhandled application error');
+
     res.status(500).json({
-      error: 'Internal Server Error',
-      message: env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message,
+      error:
+        env.NODE_ENV === 'production'
+          ? 'An unexpected error occurred'
+          : expressError?.message ?? 'Internal Server Error',
+      code: 'INTERNAL_SERVER_ERROR',
     });
   });
 

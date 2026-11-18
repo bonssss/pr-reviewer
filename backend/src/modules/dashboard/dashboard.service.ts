@@ -1,4 +1,5 @@
 import { prisma } from '../../db/prisma.js';
+import { buildRepositoryAccessWhere } from '../auth/access.js';
 
 export interface DashboardOverviewStats {
   totalRepositories: number;
@@ -32,125 +33,123 @@ export interface DashboardOverviewStats {
 
 export class DashboardService {
   /**
-   * Aggregate KPI stats for the dashboard overview
+   * Aggregate KPI stats for the dashboard overview.
+   * Every query is scoped to repositories the caller can access, and the
+   * aggregation happens in PostgreSQL instead of loading every session.
    */
-  public static async getOverviewStats(): Promise<DashboardOverviewStats> {
-    const [
-      totalRepositories,
-      totalPullRequests,
-      totalReviews,
-      completedSessions,
-      recentSessions,
-    ] = await Promise.all([
-      prisma.repository.count(),
-      prisma.pullRequest.count(),
-      prisma.reviewSession.count(),
-      prisma.reviewSession.findMany({
-        where: { status: 'COMPLETED' },
-        select: {
-          riskScore: true,
-          recommendation: true,
-          totalIssues: true,
-          criticalIssues: true,
-          highIssues: true,
-          mediumIssues: true,
-          lowIssues: true,
-        },
-      }),
-      prisma.reviewSession.findMany({
-        take: 8,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          pullRequest: {
-            include: {
-              repository: {
-                select: {
-                  fullName: true,
-                },
+  public static async getOverviewStats(userId: string): Promise<DashboardOverviewStats> {
+    const repositoryWhere = await buildRepositoryAccessWhere(userId);
+    const sessionWhere = { pullRequest: { repository: repositoryWhere } };
+
+    const [totalRepositories, totalPullRequests, totalReviews, totals, byRecommendation, recentSessions] =
+      await Promise.all([
+        prisma.repository.count({ where: repositoryWhere }),
+        prisma.pullRequest.count({ where: { repository: repositoryWhere } }),
+        prisma.reviewSession.count({ where: sessionWhere }),
+        prisma.reviewSession.aggregate({
+          where: { ...sessionWhere, status: 'COMPLETED' },
+          _count: { _all: true },
+          _avg: { riskScore: true },
+          _sum: {
+            totalIssues: true,
+            criticalIssues: true,
+            highIssues: true,
+            mediumIssues: true,
+            lowIssues: true,
+          },
+        }),
+        prisma.reviewSession.groupBy({
+          by: ['recommendation'],
+          where: { ...sessionWhere, status: 'COMPLETED' },
+          _count: { _all: true },
+        }),
+        prisma.reviewSession.findMany({
+          where: sessionWhere,
+          take: 8,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            prId: true,
+            status: true,
+            recommendation: true,
+            riskScore: true,
+            totalIssues: true,
+            criticalIssues: true,
+            createdAt: true,
+            pullRequest: {
+              select: {
+                number: true,
+                title: true,
+                repository: { select: { fullName: true } },
               },
             },
           },
-        },
-      }),
-    ]);
+        }),
+      ]);
 
-    let sumRisk = 0;
-    let criticalCount = 0;
-    let highCount = 0;
-    let mediumCount = 0;
-    let lowCount = 0;
-    let totalIssuesCount = 0;
     const recommendations = { approve: 0, requestChanges: 0, comment: 0 };
-
-    for (const session of completedSessions) {
-      if (session.riskScore !== null) {
-        sumRisk += session.riskScore;
-      }
-      criticalCount += session.criticalIssues;
-      highCount += session.highIssues;
-      mediumCount += session.mediumIssues;
-      lowCount += session.lowIssues;
-      totalIssuesCount += session.totalIssues;
-
-      if (session.recommendation === 'APPROVE') recommendations.approve++;
-      else if (session.recommendation === 'REQUEST_CHANGES') recommendations.requestChanges++;
-      else if (session.recommendation === 'COMMENT') recommendations.comment++;
+    for (const entry of byRecommendation) {
+      const count = entry._count._all;
+      if (entry.recommendation === 'APPROVE') recommendations.approve = count;
+      else if (entry.recommendation === 'REQUEST_CHANGES') recommendations.requestChanges = count;
+      else if (entry.recommendation === 'COMMENT') recommendations.comment = count;
     }
 
-    const averageRiskScore =
-      completedSessions.length > 0 ? Math.round(sumRisk / completedSessions.length) : 0;
-
-    const formattedRecent = recentSessions.map((s) => ({
-      id: s.id,
-      prId: s.prId,
-      prNumber: s.pullRequest.number,
-      prTitle: s.pullRequest.title,
-      repoFullName: s.pullRequest.repository.fullName,
-      status: s.status,
-      recommendation: s.recommendation,
-      riskScore: s.riskScore,
-      totalIssues: s.totalIssues,
-      criticalIssues: s.criticalIssues,
-      createdAt: s.createdAt,
-    }));
+    const completedCount = totals._count._all;
 
     return {
       totalRepositories,
       totalPullRequests,
       totalReviews,
-      totalIssues: totalIssuesCount,
-      criticalIssues: criticalCount,
-      highIssues: highCount,
-      mediumIssues: mediumCount,
-      lowIssues: lowCount,
-      averageRiskScore,
+      totalIssues: totals._sum.totalIssues ?? 0,
+      criticalIssues: totals._sum.criticalIssues ?? 0,
+      highIssues: totals._sum.highIssues ?? 0,
+      mediumIssues: totals._sum.mediumIssues ?? 0,
+      lowIssues: totals._sum.lowIssues ?? 0,
+      averageRiskScore:
+        completedCount > 0 ? Math.round(totals._avg.riskScore ?? 0) : 0,
       recommendations,
-      recentReviews: formattedRecent,
+      recentReviews: recentSessions.map((session) => ({
+        id: session.id,
+        prId: session.prId,
+        prNumber: session.pullRequest.number,
+        prTitle: session.pullRequest.title,
+        repoFullName: session.pullRequest.repository.fullName,
+        status: session.status,
+        recommendation: session.recommendation,
+        riskScore: session.riskScore,
+        totalIssues: session.totalIssues,
+        criticalIssues: session.criticalIssues,
+        createdAt: session.createdAt,
+      })),
     };
   }
 
-  /**
-   * List Pull Requests for dashboard explorer with latest review metrics
-   */
-  public static async listPullRequests(filters?: {
-    repoId?: string;
-    search?: string;
-  }) {
-    const where: Record<string, unknown> = {};
+  /** List Pull Requests for the dashboard explorer with latest review metrics. */
+  public static async listPullRequests(
+    userId: string,
+    filters?: { repoId?: string; search?: string },
+    pagination: { limit: number; offset: number } = { limit: 50, offset: 0 }
+  ) {
+    const repositoryWhere = await buildRepositoryAccessWhere(userId);
 
-    if (filters?.repoId) {
-      where.repoId = filters.repoId;
-    }
-
-    if (filters?.search) {
-      where.OR = [
-        { title: { contains: filters.search, mode: 'insensitive' } },
-        { author: { contains: filters.search, mode: 'insensitive' } },
-      ];
-    }
+    const searchFilter = filters?.search
+      ? {
+          OR: [
+            { title: { contains: filters.search, mode: 'insensitive' as const } },
+            { author: { contains: filters.search, mode: 'insensitive' as const } },
+          ],
+        }
+      : {};
 
     return prisma.pullRequest.findMany({
-      where,
+      where: {
+        AND: [
+          { repository: repositoryWhere },
+          ...(filters?.repoId ? [{ repoId: filters.repoId }] : []),
+          searchFilter,
+        ],
+      },
       include: {
         repository: {
           select: {
@@ -177,6 +176,8 @@ export class DashboardService {
         },
       },
       orderBy: { updatedAt: 'desc' },
+      take: pagination.limit,
+      skip: pagination.offset,
     });
   }
 }
