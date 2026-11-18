@@ -6,6 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "webhook:proxy": "smee -u https://smee.io/NeF6HnYu3YIaui00 -t http://localhost:3000/api/webhooks/github",
     "build": "tsc",
     "start": "node dist/server.js",
     "db:generate": "prisma generate",
@@ -39,6 +40,7 @@
     "@types/supertest": "^6.0.2",
     "pino-pretty": "^13.0.0",
     "prisma": "^5.22.0",
+    "smee-client": "^5.0.0",
     "supertest": "^7.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
